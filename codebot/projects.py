@@ -19,7 +19,7 @@ TEXT_EXT = {
     ".yml", ".toml", ".md", ".txt", ".sh", ".mod", ".cfg", ".ini", ".env", ".xml", ".vue",
 }
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".idea", ".vscode"}
-MAX_FILE_BYTES = 60_000
+MAX_FILE_BYTES = 400_000
 
 
 def list_projects():
@@ -74,6 +74,28 @@ def project_files(name):
         if os.path.isfile(full) and _is_typeable(full):
             with open(full, encoding="utf-8") as fh:
                 out.append((rel, fh.read()))
+    return out
+
+
+def project_scaffold(name, typed):
+    """Files of a library project that aren't typed (not in its .codebot-order): they're
+    put in place instantly when the project starts (go.mod, package.json, README...)."""
+    root = os.path.join(PROJECTS_DIR, name)
+    if not os.path.exists(os.path.join(root, ".codebot-order")):
+        return []
+    typed = set(typed)
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        for f in sorted(filenames):
+            rel = os.path.relpath(os.path.join(dirpath, f), root).replace(os.sep, "/")
+            if f.startswith(".codebot") or rel in typed:
+                continue
+            try:
+                with open(os.path.join(dirpath, f), encoding="utf-8") as fh:
+                    out.append((rel, fh.read()))
+            except (OSError, UnicodeDecodeError):
+                pass
     return out
 
 

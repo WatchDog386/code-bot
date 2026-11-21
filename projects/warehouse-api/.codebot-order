@@ -1,0 +1,5 @@
+internal/model/model.go
+internal/store/store.go
+internal/service/service.go
+internal/httpapi/httpapi.go
+internal/service/service_test.go

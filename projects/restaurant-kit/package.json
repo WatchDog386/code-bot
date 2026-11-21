@@ -1,0 +1,12 @@
+{
+  "name": "restaurant-kit",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "node dist/selftest.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

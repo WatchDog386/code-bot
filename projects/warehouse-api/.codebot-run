@@ -1,0 +1,5 @@
+# typed into VS Code's terminal by the bot after the project is written
+go vet ./...   # wait 25
+go test ./...   # wait 30
+serve: go run ./cmd/server   # wait 12
+open: http://127.0.0.1:8080/suppliers

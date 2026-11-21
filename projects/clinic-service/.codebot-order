@@ -1,0 +1,5 @@
+clinic_service/models.py
+clinic_service/repository.py
+clinic_service/services.py
+clinic_service/api.py
+tests/test_clinic.py

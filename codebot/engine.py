@@ -24,7 +24,9 @@ import pyautogui
 from . import human
 from .editor import FocusedWindowEditor, NotepadEditor, VSCodeEditor, doc_end_keys
 from .monitors import get_monitors, pick_monitor
-from .projects import guess_wait, list_projects, localize_command, project_commands, project_cycle
+from .gen import LANGUAGES as GEN_LANGUAGES, generated_cycle
+from .projects import (guess_wait, list_projects, localize_command, project_commands, project_cycle,
+                       project_scaffold)
 from .snippets import LANGUAGES, pick_pool
 
 pyautogui.FAILSAFE = True  # mouse into a corner of the main screen = emergency stop
@@ -49,7 +51,8 @@ DOUBLE_ESC_WINDOW = 0.6  # seconds between the two Esc presses
 @dataclass
 class Config:
     editor: str = "vscode"             # vscode | notepad | focused
-    source: str = "projects"           # projects | snippets | file
+    source: str = "generated"          # generated | projects | snippets | file
+    gen_languages: list = field(default_factory=lambda: ["python", "go", "typescript"])
     projects: list = field(default_factory=list)   # empty = all
     workspace_dir: str = "~/dev-projects"
     keep_finished: bool = False        # False = workspace only ever holds the current project
@@ -101,8 +104,9 @@ class Config:
             c.mode = "both"
         if c.editor not in ("vscode", "notepad", "focused"):
             c.editor = "vscode"
-        if c.source not in ("projects", "snippets", "file"):
-            c.source = "projects"
+        if c.source not in ("generated", "projects", "snippets", "file"):
+            c.source = "generated"
+        c.gen_languages = [l for l in c.gen_languages if l in GEN_LANGUAGES] or list(GEN_LANGUAGES)
         return c
 
 
@@ -133,6 +137,7 @@ class Bot:
         self.activity = ""
         self.live = {"project": "", "files": [], "done": [], "file": "", "text": ""}
         self.terminal = deque(maxlen=400)   # output of commands the bot ran
+        self.current_files = {}             # rel path -> source of the project being written
         # _hands set = the bot may send keystrokes (cleared when you type, or click into
         # another window); _mouse set = the bot may move the mouse (cleared while you move it)
         self._hands = threading.Event()
@@ -594,6 +599,24 @@ class Bot:
 
     # ------------------------------------------------------------- sources
     def _jobs(self):
+        """Yield (project, files, meta) forever. meta: scaffold files + terminal steps."""
+        cfg = self.cfg
+        if cfg.source == "generated":
+            for p in generated_cycle(only=cfg.gen_languages):
+                self.log(f"New project idea: {p['name']} - {p['title']} in {p['language']}, "
+                         f"{len(p['records'])} record types, "
+                         f"{sum(t.count(chr(10)) for _, t in p['files']):,} lines")
+                yield p["name"], p["files"], p
+            return
+        for job in self._library_jobs():
+            if len(job) == 2:
+                name, files = job
+                yield name, files, {"scaffold": project_scaffold(name, [r for r, _ in files])
+                                    if cfg.source == "projects" else []}
+            else:
+                yield job
+
+    def _library_jobs(self):
         cfg = self.cfg
         if cfg.source == "file" and cfg.custom_file:
             try:
@@ -834,7 +857,7 @@ class Bot:
         return True
 
     def _type_loop(self):
-        for project, files in self._jobs():
+        for project, files, meta in self._jobs():
             if not self._gate():
                 return
             with self._act():
@@ -842,9 +865,12 @@ class Bot:
                 if self.cfg.maximize and self.monitor and hands:
                     self.editor.place(self.monitor.work)
                 self.editor.begin_project(project, interactive=hands)
+                self._write_scaffold(meta.get("scaffold") or [])
             self.stats.update(project=project, files_total=len(files), file_index=0)
             self.stats["projects"] += 1
             self.live.update(project=project, files=[r for r, _ in files], done=[], file="", text="")
+            self.current_files = dict(files)
+            self.current_files.update(dict(meta.get("scaffold") or []))
             self.event("plan", f"Planned {project}", f"{len(files)} files: " +
                        ", ".join(r for r, _ in files[:6]) + (" ..." if len(files) > 6 else ""))
             for i, (rel, content) in enumerate(files, 1):
@@ -885,7 +911,7 @@ class Bot:
                     return
             self.log(f"Finished project {project}")
             self.event("done", f"Finished {project}", f"{len(files)} files written")
-            if self.cfg.run_terminal and not self._run_commands(project):
+            if self.cfg.run_terminal and not self._run_commands(project, meta.get("steps")):
                 return
             if not self._wait(random.uniform(25, 60) * self.cfg.think):
                 return
@@ -924,14 +950,26 @@ class Bot:
     def _term(self, line):
         self.terminal.append(line)
 
-    def _run_commands(self, project):
+    def _write_scaffold(self, scaffold):
+        """Small files a project needs but nobody types (go.mod, package.json, README...)."""
+        project_dir = getattr(self.editor, "project_dir", None)
+        if not project_dir or not scaffold:
+            return
+        for rel, text in scaffold:
+            path = os.path.join(project_dir, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+        self.log(f"Set up {len(scaffold)} project file(s): " + ", ".join(r for r, _ in scaffold))
+
+    def _run_commands(self, project, steps=None):
         """Build / test / run the project like a developer: with the keyboard, the bot opens
         VS Code's terminal, cd's into the project and types each command; an app started with
         `serve:` is left running and opened in VS Code's built-in browser, then stopped with
         Ctrl+C. While you have the keyboard, the same steps run in the background and the
         output goes to the dashboard."""
         project_dir = getattr(self.editor, "project_dir", None)
-        steps = project_commands(project)
+        steps = steps or project_commands(project)
         if not steps or not project_dir or not os.path.isdir(project_dir):
             return True
         self.event("plan", "Opening the terminal", " · ".join(s["cmd"] for s in steps))

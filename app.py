@@ -23,6 +23,8 @@ try:
     from codebot.engine import Bot, Config, monitors_info
     from codebot.projects import list_projects, project_files
     from codebot.snippets import LANGUAGES
+    from codebot.gen import LANGUAGES as GEN_LANGUAGES
+    from codebot.gen.schema import DOMAINS as GEN_DOMAINS
 except ImportError as exc:
     print(f"Missing dependency ({exc}). Run:\n    python -m pip install -r requirements.txt")
     sys.exit(1)
@@ -87,6 +89,12 @@ class Handler(BaseHTTPRequestHandler):
             if not data:
                 return self._send(503, {"error": "screen capture not available"})
             return self._send(200, data, "image/jpeg")
+        if url.path == "/api/project" and q.get("name") == bot.live["project"] and bot.current_files:
+            return self._send(200, {"name": q["name"], "files": [
+                {"path": rel, "lines": text.count("\n") + 1, "bytes": len(text)}
+                for rel, text in bot.current_files.items()]})
+        if url.path == "/api/file" and q.get("project") == bot.live["project"] and q.get("path") in bot.current_files:
+            return self._send(200, {"path": q["path"], "text": bot.current_files[q["path"]]})
         if url.path == "/api/project":
             name = q.get("name", "")
             if name not in list_projects():
@@ -110,6 +118,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/settings":
             from dataclasses import asdict
             return self._send(200, {"config": asdict(load_settings()), "languages": LANGUAGES,
+                                    "generator": {"languages": list(GEN_LANGUAGES),
+                                                  "domains": {k: v[0] for k, v in GEN_DOMAINS.items()}},
                                     "projects": list_projects(), "monitors": monitors_info()})
         self._send(404, {"error": "not found"})
 

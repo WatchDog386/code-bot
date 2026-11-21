@@ -127,6 +127,31 @@ python code_bot.py --monitor 3
 Screens are numbered left to right. VS Code is moved to that screen and maximized there, and
 the bot's mouse never leaves it. "Auto" picks a side screen (not your main one).
 
+## Projects: a new one every time
+
+By default the bot **comes up with a new project for every run** ("New project every time" in
+Settings > What to write, or `new project` in the agent box). It picks one of 14 kinds of
+business app (library, clinic, hotel, fleet, school, warehouse, restaurant, gym, events, real
+estate, help desk, payroll, farm, shipping) and one of 3 languages:
+
+| Language | What it writes (each typed file is over 1000 lines) | Terminal afterwards |
+|---|---|---|
+| Python | models, repository, services, HTTP API, unittest suite (standard library only) | compile, run the tests, start the API and open it in VS Code |
+| Go | model, store, service, `net/http` API, tests | `go vet`, `go test`, `go run`, open it in VS Code |
+| TypeScript | models, store, services, query layer, self-test (strict, no dependencies) | `npm install`, `tsc`, run the self-test |
+
+Records are added to the project until every file it types is over 1000 lines (typically
+1000-2600). The code is real and works: every combination is checked to compile and pass its
+own tests. Small files a project needs (go.mod, package.json, README, `__init__.py`) are put in
+place instantly instead of being typed. Pick the languages under Settings > What to write.
+
+The **Projects** page also has a library of 9 ready projects (6 of them generated this way). To
+add more generated ones to the library:
+
+```bash
+python -m codebot.gen --out projects --count 6
+```
+
 ## How it works
 
 - **Real projects**: `projects/` holds complete projects (Python FastAPI service, React +

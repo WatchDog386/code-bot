@@ -558,6 +558,11 @@
 
     <!-- ==================================================== PROJECTS -->
     <section class="page hidden" data-page="projects">
+      <div class="panel" style="margin-bottom:20px">
+        <div class="panel-head"><h2>New project every time</h2><button class="btn primary" id="genStart"><span data-i="sparkle"></span>Write a new project</button></div>
+        <p class="muted" style="margin:0">The bot comes up with a fresh, complete project for each run: a different kind of business app in Python, Go or TypeScript, with models, storage, business rules, an API or query layer and a full test suite. Every file it types is over 1000 lines; then it builds, tests and runs the project in VS Code's terminal.</p>
+        <div class="chips" id="genDomains" style="gap:6px"></div>
+      </div>
       <div class="panel">
         <div class="panel-head"><h2>Projects library</h2><span class="muted">Ticked projects are written in rotation — none ticked = all of them</span></div>
         <table>
@@ -650,11 +655,14 @@
                 </select></div>
               <div><label class="f" style="margin-top:0">Source</label>
                 <select id="source">
+                  <option value="generated">New project every time (1000+ lines per file)</option>
                   <option value="projects">Projects library</option>
                   <option value="snippets">Short snippets</option>
                   <option value="file">My own file</option>
                 </select></div>
             </div>
+            <div id="box_generated"><label class="f">Languages for new projects</label><div class="chips" id="gen_langs"></div>
+              <p class="muted" style="margin:10px 0 0">The bot comes up with a new, complete project every time (14 kinds of business app, Python / Go / TypeScript). Every file it types is over 1000 lines, with tests that pass.</p></div>
             <div id="box_projects"><p class="muted" style="margin:14px 0 0">Choose projects on the <button class="link" data-go="projects">Projects</button> page.</p></div>
             <div id="box_snippets" class="hidden"><label class="f">Languages</label><div class="chips" id="langs"></div></div>
             <div id="box_file" class="hidden"><label class="f">File to type (full path)</label><input type="text" id="custom_file" placeholder="C:\Users\me\projects\app\main.py"></div>
@@ -760,7 +768,7 @@ const paintIcons = (root = document) => root.querySelectorAll("[data-i]").forEac
 /* ================================================================ helpers */
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-let languages = [], projects = [], monitors = [], projectMeta = {};
+let languages = [], projects = [], monitors = [], projectMeta = {}, generator = { languages: [], domains: {} };
 let lastStatus = null;
 
 function fmt(sec) {
@@ -915,6 +923,7 @@ $("setTabs").onclick = (e) => {
 function toggleBoxes() {
   const src = $("source").value;
   $("box_projects").classList.toggle("hidden", src !== "projects");
+  $("box_generated").classList.toggle("hidden", src !== "generated");
   $("box_snippets").classList.toggle("hidden", src !== "snippets");
   $("box_file").classList.toggle("hidden", src !== "file");
   $("box_ws").classList.toggle("hidden", $("editor").value !== "vscode");
@@ -945,6 +954,7 @@ function readForm() {
     think: +$("think").value,
     monitor: +$("monitor").value,
     languages: [...document.querySelectorAll("#langs input:checked")].map((i) => i.value),
+    gen_languages: [...document.querySelectorAll("#gen_langs input:checked")].map((i) => i.value),
     projects: [...document.querySelectorAll("#projects input:checked")].map((i) => i.value),
     custom_file: $("custom_file").value.trim(),
     editor: $("editor").value,
@@ -974,6 +984,8 @@ function fillForm(c) {
   $("monitor").value = String(c.monitor);
   $("projects").innerHTML = projects.map((p) =>
     `<input type="checkbox" value="${esc(p)}" ${c.projects.includes(p) ? "checked" : ""}>`).join("");
+  $("gen_langs").innerHTML = generator.languages.map((l) =>
+    `<label><input type="checkbox" value="${esc(l)}" ${(c.gen_languages || []).includes(l) ? "checked" : ""}> ${esc(l === "typescript" ? "TypeScript" : l === "go" ? "Go" : "Python")}</label>`).join("");
   $("langs").innerHTML = languages.map((l) =>
     `<label><input type="checkbox" value="${esc(l)}" ${c.languages.includes(l) ? "checked" : ""}> ${esc(l)}</label>`).join("");
   toggleBoxes(); renderProjTable(); syncQuickProject(); $("sbWpm").textContent = c.wpm + " WPM";
@@ -982,7 +994,8 @@ const saveSettings = () => api("/api/settings", readForm());
 $("wpm").oninput = () => { $("wpmv").textContent = $("wpm").value; $("sbWpm").textContent = $("wpm").value + " WPM"; };
 $("typo_rate").oninput = () => $("typov").textContent = $("typo_rate").value;
 $("think").oninput = () => $("thinkv").textContent = (+$("think").value).toFixed(1);
-$("source").addEventListener("change", toggleBoxes);
+$("source").addEventListener("change", () => { toggleBoxes(); syncQuickProject(); });
+$("genStart").onclick = () => { $("source").value = "generated"; toggleBoxes(); syncQuickProject(); saveSettings().then(() => { go("agent"); doStart(); }); };
 $("editor").addEventListener("change", toggleBoxes);
 document.querySelector('[data-page="behavior"]').addEventListener("change", (e) => {
   if (e.target.name === "mode") $("qMode").value = e.target.value;
@@ -1052,7 +1065,12 @@ function buildTree(paths) {
 }
 function renderTree() {
   const src = treeSource();
-  if ($("browseProject").value !== src.project) $("browseProject").value = src.project || "";
+  const pick = $("browseProject");
+  if (src.project && ![...pick.options].some((o) => o.value === src.project)) {
+    pick.querySelector("[data-live]")?.remove();
+    pick.insertAdjacentHTML("afterbegin", `<option data-live value="${esc(src.project)}">${esc(src.project)} (new)</option>`);
+  }
+  if (pick.value !== src.project) pick.value = src.project || "";
   $("browseProject").disabled = src.mode === "live";
   const done = new Set(live.done);
   const activePath = tabs.find((t) => t.id === activeTab)?.path;
@@ -1154,7 +1172,7 @@ $("followBtn").onclick = () => {
   follow = !follow; $("followBtn").classList.toggle("on", follow);
   if (follow && tabs.find((t) => t.id === "live")) { activeTab = "live"; renderTabs(); renderEditor(true); renderTree(); }
 };
-let lastRender = "";
+let lastRender = "", renderedTab = "", renderedRows = [];
 function renderEditor(force) {
   const t0 = tabs.find((x) => x.id === activeTab);
   const isPreview = t0?.id === "preview";
@@ -1175,8 +1193,24 @@ function renderEditor(force) {
   const lines = htmlLines(highlight(t.text || "", t.path));
   const raw = (t.text || "").split("\n");
   const cur = isLive ? lines.length - 1 : -1;
-  $("code").innerHTML = lines.map((l, i) =>
-    `<div class="ln${i === cur ? " cur" : ""}"><span class="n">${i + 1}</span><span class="c">${l}${i === cur ? '<i class="caret"></i>' : ""}</span></div>`).join("");
+  const rowHtml = (l, i) => `<span class="n">${i + 1}</span><span class="c">${l}${i === cur ? '<i class="caret"></i>' : ""}</span>`;
+  const box = $("code");
+  if (force || renderedTab !== t.id + "|" + t.path) {
+    box.innerHTML = lines.map((l, i) => `<div class="ln${i === cur ? " cur" : ""}">${rowHtml(l, i)}</div>`).join("");
+    renderedRows = lines.map((l, i) => rowHtml(l, i));
+    renderedTab = t.id + "|" + t.path;
+  } else {
+    // only touch the rows that changed (files are 1000+ lines)
+    const rows = box.children;
+    while (rows.length > lines.length) { box.lastElementChild.remove(); renderedRows.pop(); }
+    lines.forEach((l, i) => {
+      const html = rowHtml(l, i);
+      if (i >= rows.length) {
+        const div = document.createElement("div"); div.className = "ln"; div.innerHTML = html; box.appendChild(div); renderedRows[i] = html;
+      } else if (renderedRows[i] !== html) { rows[i].innerHTML = html; renderedRows[i] = html; }
+      rows[i].classList.toggle("cur", i === cur);
+    });
+  }
   $("sbLang").textContent = langOf(t.path)[0];
   $("sbPos").textContent = isLive ? `Ln ${raw.length}, Col ${raw[raw.length - 1].length + 1}` : `${raw.length} lines`;
   if (isLive && follow) {
@@ -1241,7 +1275,8 @@ let chatOrder = 0;
 function say(text) { chat.push({ type: "user", text, t: Date.now() / 1000, order: ++chatOrder }); }
 function reply(html) { chat.push({ type: "bot", html, t: Date.now() / 1000, order: ++chatOrder }); renderSteps(); }
 const HELP = `Here's what I understand:
-<code>start</code> / <code>write &lt;project&gt;</code> — start writing (e.g. <code>write link-shortener</code>)
+<code>new project</code> — come up with a new project every time (add <code>in go</code> / <code>python</code> / <code>typescript</code>)
+<code>start</code> / <code>write &lt;project&gt;</code> — start writing (e.g. <code>write fleet-api</code>)
 <code>pause</code> · <code>resume</code> · <code>stop</code>
 <code>60 wpm</code> — typing speed · <code>think 1.5</code> — longer pauses · <code>typos 3%</code>
 <code>typing only</code> · <code>mouse only</code> · <code>mouse and typing</code>
@@ -1277,6 +1312,12 @@ async function runCommand(raw) {
   if (/typing only|type only|just typ|no mouse/.test(t)) { setMode("type"); did.push("typing only"); }
   else if (/mouse only|just (the )?mouse|no typing/.test(t)) { setMode("mouse"); did.push("mouse only"); }
   else if (/mouse and typ|both/.test(t)) { setMode("both"); did.push("mouse + typing"); }
+  if (/new project|generate|come up with|something new|fresh project/.test(t)) {
+    $("source").value = "generated"; toggleBoxes(); syncQuickProject();
+    const langs = [["python", /python/], ["go", /\bgo(lang)?\b/], ["typescript", /typescript|\bts\b/]].filter(([, re]) => re.test(t)).map(([l]) => l);
+    if (langs.length) document.querySelectorAll("#gen_langs input").forEach((i) => i.checked = langs.includes(i.value));
+    did.push("a new project every time" + (langs.length ? " in " + langs.join(", ") : ""));
+  }
   const named = projects.filter((p) => t.includes(p.toLowerCase()) || t.includes("@" + p.toLowerCase()));
   if (named.length) { $("source").value = "projects"; setSelectedProjects(named); did.push("project " + named.join(", ")); }
   else if (/all projects|every project|any project/.test(t)) { $("source").value = "projects"; setSelectedProjects([]); did.push("all projects in rotation"); }
@@ -1308,10 +1349,13 @@ $("send").onclick = () => {
 };
 function syncQuickProject() {
   const sel = selectedProjects();
-  $("qProject").innerHTML = `<option value="">All projects</option>` + projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
-  $("qProject").value = sel.length === 1 ? sel[0] : "";
+  $("qProject").innerHTML = `<option value="__gen__">New project every time</option><option value="">All library projects</option>` +
+    projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+  $("qProject").value = $("source").value === "generated" ? "__gen__" : sel.length === 1 ? sel[0] : "";
 }
-$("qProject").onchange = () => { $("source").value = "projects"; toggleBoxes(); setSelectedProjects($("qProject").value ? [$("qProject").value] : []); saveSettings(); if ($("qProject").value) browse($("qProject").value); };
+$("qProject").onchange = () => {
+  if ($("qProject").value === "__gen__") { $("source").value = "generated"; toggleBoxes(); saveSettings(); return; }
+  $("source").value = "projects"; toggleBoxes(); setSelectedProjects($("qProject").value ? [$("qProject").value] : []); saveSettings(); if ($("qProject").value) browse($("qProject").value); };
 $("qMode").onchange = () => { setMode($("qMode").value); saveSettings(); };
 
 /* ================================================================ actions */
@@ -1518,6 +1562,8 @@ go(page);
 (async () => {
   const s = await api("/api/settings");
   languages = s.languages; projects = s.projects; monitors = s.monitors || [];
+  generator = s.generator || generator;
+  $("genDomains").innerHTML = Object.entries(generator.domains).map(([k, title]) => `<span class="pill" title="${esc(k)}">${esc(title)}</span>`).join("");
   $("browseProject").innerHTML = projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
   fillForm(s.config);
   renderTree(); renderTabs(); renderEditor(true); renderSteps();
