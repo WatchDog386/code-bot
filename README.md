@@ -77,13 +77,34 @@ light/dark), with a coding-agent workspace in the style of Cursor / Windsurf:
   (Turn this off with "Keep writing code while I work". Notepad mode pauses instead.)
 - `Ctrl+C` in the terminal quits the server.
 
+## What the mouse does
+
+The cursor works the way a developer's hand does, and every move fits what is happening:
+
+| While the bot is... | the mouse... |
+|---|---|
+| typing | rests near the line being written, glances at the file in the explorer |
+| thinking | follows the code up the screen, hovers names to see their pop-up, clicks to put the caret where the next line goes |
+| finishing a file | scrolls back up through it, reads it, scrolls back down |
+| opening the terminal | goes up to the menu bar, clicks **Terminal**, then **New Terminal**, then clicks into the terminal |
+| running commands | watches the output in the terminal panel |
+| running the app | looks at the app's page, opened next to the code, and scrolls through it |
+
+The menu bar is found on screen (from a screenshot of VS Code's title bar), so it works with
+any theme, screen size or scaling. If the menu can't be found for certain, or didn't open, the
+bot uses the command palette instead, so a missed click never does anything unexpected; after
+any click it puts the cursor back at the end of the code before typing again. It only clicks
+or scrolls when VS Code is the window in front, never in yours. (On macOS the menus live in
+the system menu bar, so there it uses the command palette.)
+
 ## Terminal
 
 When a project is finished the bot works in the terminal like a developer:
 
 - **Bot has the keyboard:** it opens a new VS Code terminal (`Terminal: Create New Terminal`),
   `cd`s into the project and types each command: install, tests, build. Then it **starts the
-  app** and opens it in **VS Code's built-in browser** (`Simple Browser`), leaves it running for
+  app** and opens it in **VS Code's built-in browser** (`Simple Browser`) **beside the code**,
+  so code is on the left and the running app on the right. It leaves it running for
   a while (45 s, "Keep a started app running for"), and stops it with `Ctrl+C`.
 - **You have the keyboard (or not VS Code):** the same steps run in the background; the output,
   exit codes and whether the app answered show in the dashboard's **Terminal** tab.
@@ -183,7 +204,7 @@ python -m codebot.gen --out projects --count 6
   re-read code, Ctrl+S now and then, speed drifting over time.
 - **Human mouse**: curved paths, slow-fast-slow speed, slight tremor, overshoot and
   correction, small resting drifts, "reading" moves over the code, glances at the file explorer,
-  scrolling. It never clicks.
+  scrolling, and clicks with a purpose (see "What the mouse does").
 - **Your own projects**: drop any folder into `projects/`. Add a `.codebot-order` file listing
   files in order if you want, otherwise configs/docs go first, then source, then tests.
   Only plain-ASCII text files are typed.

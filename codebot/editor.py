@@ -435,8 +435,44 @@ class VSCodeEditor:
         self.focus(force=True)
         self._palette("Terminal: Focus Terminal", settle=1.2)
 
-    def open_browser(self, url):
-        """Show the running app inside VS Code (Simple Browser)."""
+    def layout(self):
+        """Where the editor, explorer, terminal panel... are on screen right now."""
+        from .vscode_ui import Layout
+        rect = self.region()
+        if getattr(self, "_layout", None) is None or self._layout.rect != tuple(int(v) for v in rect):
+            self._layout = Layout(rect)
+        return self._layout
+
+    def open_terminal_ui(self, use_mouse=True, stop=None):
+        """Terminal > New Terminal with the mouse (menu bar), like a person would. Falls back
+        to the command palette if the menu can't be found or didn't open. Returns how."""
+        from .vscode_ui import click_menu
+        self.focus(force=True)
+        how = "palette"
+        if use_mouse and click_menu(self.layout(), "Terminal", 0, stop=stop):
+            how = "menu"
+            time.sleep(2.0)
+        else:
+            self._palette("Terminal: Create New Terminal", settle=2.5)
+        self.click_terminal(use_mouse, stop)
+        return how
+
+    def click_terminal(self, use_mouse=True, stop=None):
+        """Click into the terminal panel, then make sure the terminal really has the focus
+        (so a command can never end up typed into the code)."""
+        from . import human
+        from .vscode_ui import point_in
+        if use_mouse:
+            x, y = point_in(self.layout().panel(), fx=random.uniform(0.15, 0.5), fy=random.uniform(0.45, 0.8))
+            human.move_to(x, y, stop=stop)
+            if not (stop and stop()):
+                time.sleep(random.uniform(0.15, 0.35))
+                pyautogui.click()
+                time.sleep(0.3)
+        self._palette("Terminal: Focus Terminal", settle=0.8)
+
+    def open_browser(self, url, beside=True):
+        """Show the running app inside VS Code (Simple Browser), next to the code."""
         self.focus(force=True)
         self._palette("Simple Browser: Show", settle=1.0)
         for ch in url:
@@ -445,6 +481,8 @@ class VSCodeEditor:
         time.sleep(0.4)
         pyautogui.press("enter")
         time.sleep(2.0)
+        if beside:   # into a group of its own on the right: code left, app right
+            self._palette("View: Move Editor into Next Group", settle=1.5)
 
     def focus_editor(self):
         self._palette("View: Focus Active Editor Group", settle=0.6)

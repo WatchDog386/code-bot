@@ -142,6 +142,7 @@ class Bot:
         self.terminal = deque(maxlen=400)   # output of commands the bot ran
         self.current_files = {}             # rel path -> source of the project being written
         self._job_iter = None               # the never-ending project rotation
+        self._need_caret = False            # the bot clicked in the code: caret back to the end
         # _hands set = the bot may send keystrokes (cleared when you type, or click into
         # another window); _mouse set = the bot may move the mouse (cleared while you move it)
         self._hands = threading.Event()
@@ -403,8 +404,11 @@ class Bot:
                 self._user_input("mouse")
 
         def on_click(x, y, button, pressed, injected=None):
-            if pressed and not (injected and flag_reliable):
-                self._user_input("click")  # the bot never clicks
+            if not pressed or (injected and flag_reliable):
+                return
+            if not flag_reliable and (self._acting or time.time() - self._act_end < 0.3):
+                return  # the bot's own click (it only clicks while holding the controls)
+            self._user_input("click")
 
         def on_scroll(x, y, dx, dy, injected=None):
             if not injected and not self._acting and time.time() - self._act_end > 0.3:
@@ -585,35 +589,125 @@ class Bot:
 
     # ---------------------------------------------------------------- mouse
     def _mouse_loop(self):
+        """The hand on the mouse. In VS Code every move has a reason that fits what the bot
+        is doing: resting by the line being typed, placing the caret, reading and hovering
+        code while thinking, scrolling back over a finished file, watching the terminal,
+        looking at the running app next to the code."""
         while self._gate_mouse():
-            r = random.random()
-            with self._act():  # all pyautogui calls stay under the lock (X11 isn't thread-safe)
+            did_move = False
+            with self._act():                     # one sender at a time (X11 isn't thread-safe)
                 if self._halt():
                     continue
-                l, t, w, h = self.editor.region() if self.editor else human.bounds()
-                if r < 0.45:
-                    human.micro_drift(stop=self._halt)
-                elif r < 0.68:
-                    human.read_lines((l, t, w, h), stop=self._halt)
-                elif r < 0.80:  # glance at the file explorer / sidebar
-                    human.move_to(l + w * random.uniform(0.04, 0.16), t + h * random.uniform(0.15, 0.7),
-                                  stop=self._halt)
-                elif r < 0.92 and self.cfg.scroll and self._hands.is_set():  # VS Code in front
-                    human.move_to(l + w * random.uniform(0.3, 0.7), t + h * random.uniform(0.3, 0.7),
-                                  stop=self._halt)
-                    for _ in range(random.randint(1, 4)):
-                        if self._halt():
-                            break
-                        pyautogui.scroll(random.choice([-3, -2, -1, 1, 2]))
-                        time.sleep(random.uniform(0.1, 0.4))
-                    self.stats["scrolls"] += 1
-                else:  # somewhere else on this screen
-                    bx, by, bw, bh = human.bounds()
-                    human.move_to(bx + random.uniform(0.1, 0.9) * bw, by + random.uniform(0.1, 0.9) * bh,
-                                  stop=self._halt)
-            self.stats["mouse_moves"] += 1
+                layout = None
+                if self.editor is not None and self.editor.kind == "vscode" and hasattr(self.editor, "layout"):
+                    try:
+                        layout = self.editor.layout()
+                    except Exception:  # noqa: BLE001
+                        layout = None
+                if layout is not None:
+                    did_move = self._purposeful_move(layout)
+                else:
+                    did_move = self._idle_move()
+            if did_move:
+                self.stats["mouse_moves"] += 1
             if not self._wait(random.uniform(self.cfg.mouse_min, self.cfg.mouse_max)):
                 return
+
+    def _vscode_in_front(self):
+        """Clicks and scrolls only when VS Code is the window you'd hit (never yours)."""
+        if not self._hands.is_set():
+            return False
+        active = self.editor.is_active() if hasattr(self.editor, "is_active") else None
+        return active is True
+
+    def _purposeful_move(self, layout):
+        from .vscode_ui import point_in
+        act, stop, r = self.activity, self._halt, random.random()
+        text = layout.editor_text()
+        front = self._vscode_in_front()
+        if act == "typing":
+            # the hand rests near where the code is growing (the caret is low in the view)
+            if r < 0.55:
+                human.move_to(*point_in(text, fx=random.uniform(0.25, 0.6), fy=random.uniform(0.62, 0.9)),
+                              speed=0.7, stop=stop)
+            elif r < 0.8:
+                human.micro_drift(stop=stop)
+            else:   # glance at the explorer to see the file in the tree
+                human.move_to(*point_in(layout.explorer(), fx=random.uniform(0.2, 0.7), fy=random.uniform(0.05, 0.5)),
+                              stop=stop)
+            return True
+        if act == "thinking":
+            if r < 0.45:
+                human.read_lines(text, stop=stop)                     # eyes follow the code up the screen
+            elif r < 0.75 or not front:
+                # hover a name to see its definition / type pop-up
+                human.move_to(*point_in(text, fx=random.uniform(0.05, 0.35), fy=random.uniform(0.2, 0.85)),
+                              speed=0.8, stop=stop)
+                time.sleep(random.uniform(0.8, 2.0))
+            else:
+                # click at the end of the code to put the caret where the next line goes
+                human.move_to(*point_in(text, fx=random.uniform(0.35, 0.7), fy=random.uniform(0.75, 0.92)), stop=stop)
+                if not stop():
+                    time.sleep(random.uniform(0.1, 0.3))
+                    pyautogui.click()
+                    self._need_caret = True
+            return True
+        if act == "reviewing":
+            # scroll back over the file that was just written, read it, come back down
+            human.move_to(*point_in(text), stop=stop)
+            if front and self.cfg.scroll and not stop():
+                notches = random.randint(3, 8)
+                for _ in range(notches):
+                    if stop():
+                        break
+                    pyautogui.scroll(random.choice([2, 3]))
+                    time.sleep(random.uniform(0.25, 0.7))
+                    self.stats["scrolls"] += 1
+                human.read_lines(text, stop=stop)
+                for _ in range(notches):
+                    if stop():
+                        break
+                    pyautogui.scroll(-3)
+                    time.sleep(random.uniform(0.1, 0.3))
+            else:
+                human.read_lines(text, stop=stop)
+            return True
+        if act == "terminal":
+            # watch the command's output in the terminal panel
+            human.move_to(*point_in(layout.panel(), fx=random.uniform(0.1, 0.6), fy=random.uniform(0.2, 0.9)),
+                          speed=0.7, stop=stop)
+            if r < 0.3:
+                human.micro_drift(stop=stop)
+            return True
+        if act == "serving":
+            # look at the running app in the browser next to the code
+            side = layout.side()
+            human.move_to(*point_in(side), stop=stop)
+            if front and self.cfg.scroll and r < 0.6 and not stop():
+                for _ in range(random.randint(1, 3)):
+                    pyautogui.scroll(random.choice([-3, -2, 2]))
+                    time.sleep(random.uniform(0.4, 1.0))
+                self.stats["scrolls"] += 1
+            return True
+        # between projects / starting up: look over the explorer and the code
+        if r < 0.5:
+            human.move_to(*point_in(layout.explorer()), stop=stop)
+        else:
+            human.micro_drift(stop=stop)
+        return True
+
+    def _idle_move(self):
+        """Notepad / focused window: no VS Code layout to work with."""
+        r = random.random()
+        l, t, w, h = self.editor.region() if self.editor else human.bounds()
+        if r < 0.5:
+            human.micro_drift(stop=self._halt)
+        elif r < 0.85:
+            human.read_lines((l, t, w, h), stop=self._halt)
+        else:
+            bx, by, bw, bh = human.bounds()
+            human.move_to(bx + random.uniform(0.1, 0.9) * bw, by + random.uniform(0.1, 0.9) * bh, stop=self._halt)
+        return True
 
     # ------------------------------------------------------------- sources
     def _jobs(self):
@@ -845,6 +939,9 @@ class Bot:
                         if not self._hands.is_set() or not self._check_click():
                             continue
                         self._refocus_if_needed()
+                        if self._need_caret and self.editor.kind != "focused":
+                            pyautogui.hotkey(*doc_end_keys())
+                            self._need_caret = False
                         if pos == 0 and cfg.keep_focus and self.editor.kind != "focused":
                             self.editor.focus()
                             pyautogui.hotkey(*doc_end_keys())  # caret back to end, whatever happened
@@ -1016,6 +1113,7 @@ class Bot:
         if self.editor.kind == "vscode" and term_open and self._hands.is_set():
             with self._act():
                 self.editor.focus_editor()
+        self._need_caret = True
         self._need_refocus = True
         return True
 
@@ -1027,8 +1125,12 @@ class Bot:
         with self._act():
             if not self._hands.is_set() or not self._check_click():
                 return False
+            mouse = self._mouse.is_set()
             if not term_open:
-                self.editor.new_terminal()
+                how = self.editor.open_terminal_ui(use_mouse=mouse, stop=self._halt)
+                self.event("term", "Opened a terminal",
+                           "Terminal > New Terminal (clicked in the menu bar)" if how == "menu"
+                           else "Terminal: Create New Terminal")
                 self._term(f"(VS Code terminal) $ cd \"{project_dir}\"")
                 n = self._type_text(f'cd "{project_dir}"', base, mirror=False)
                 if n is None:
@@ -1036,7 +1138,7 @@ class Bot:
                 pyautogui.press("enter")
                 time.sleep(random.uniform(0.8, 1.6))
             else:
-                self.editor.open_terminal()
+                self.editor.click_terminal(use_mouse=mouse, stop=self._halt)
             n = self._type_text(cmd, base, mirror=False)
             if n is None:
                 return None
@@ -1049,23 +1151,25 @@ class Bot:
             # the bot can't read VS Code's terminal, so give the command a realistic time
             return True if self._wait((step["wait"] or guess_wait(cmd)) * random.uniform(0.9, 1.3)) else None
         self.event("term", f"$ {cmd}", "starting the app in the VS Code terminal")
+        self.activity = "serving"
         if not self._wait(step["wait"] or random.uniform(6, 10)):
             return None
         if step["open"] and self._gate_hands():
             with self._act():
                 if self._hands.is_set():
-                    self.editor.open_browser(step["open"])
-                    self.event("term", f"Opened {step['open']}", "in VS Code's browser")
+                    self.editor.open_browser(step["open"], beside=True)
+                    self.event("term", f"Opened {step['open']}", "in VS Code's browser, next to the code")
         if not self._wait(self.cfg.serve_seconds * random.uniform(0.8, 1.2)):
             return None
         # stop the app: back to its terminal, Ctrl+C
         if not self._gate_hands():
             return None
         with self._act():
-            self.editor.open_terminal()
+            self.editor.click_terminal(use_mouse=self._mouse.is_set(), stop=self._halt)
             pyautogui.hotkey("ctrl", "c")
             time.sleep(0.8)
             pyautogui.hotkey("ctrl", "c")
+        self.activity = "terminal"
         self._term("(VS Code terminal) ^C")
         self.event("term", "Stopped the app", "Ctrl+C")
         return True
