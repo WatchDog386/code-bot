@@ -655,6 +655,7 @@
                 </select></div>
               <div><label class="f" style="margin-top:0">Source</label>
                 <select id="source">
+                  <option value="mixed">Loop forever: new projects + library projects</option>
                   <option value="generated">New project every time (1000+ lines per file)</option>
                   <option value="projects">Projects library</option>
                   <option value="snippets">Short snippets</option>
@@ -923,7 +924,7 @@ $("setTabs").onclick = (e) => {
 function toggleBoxes() {
   const src = $("source").value;
   $("box_projects").classList.toggle("hidden", src !== "projects");
-  $("box_generated").classList.toggle("hidden", src !== "generated");
+  $("box_generated").classList.toggle("hidden", src !== "generated" && src !== "mixed");
   $("box_snippets").classList.toggle("hidden", src !== "snippets");
   $("box_file").classList.toggle("hidden", src !== "file");
   $("box_ws").classList.toggle("hidden", $("editor").value !== "vscode");
@@ -1275,6 +1276,7 @@ let chatOrder = 0;
 function say(text) { chat.push({ type: "user", text, t: Date.now() / 1000, order: ++chatOrder }); }
 function reply(html) { chat.push({ type: "bot", html, t: Date.now() / 1000, order: ++chatOrder }); renderSteps(); }
 const HELP = `Here's what I understand:
+<code>loop forever</code> — never stop: a new project, then a library project, and round again
 <code>new project</code> — come up with a new project every time (add <code>in go</code> / <code>python</code> / <code>typescript</code>)
 <code>start</code> / <code>write &lt;project&gt;</code> — start writing (e.g. <code>write fleet-api</code>)
 <code>pause</code> · <code>resume</code> · <code>stop</code>
@@ -1312,7 +1314,10 @@ async function runCommand(raw) {
   if (/typing only|type only|just typ|no mouse/.test(t)) { setMode("type"); did.push("typing only"); }
   else if (/mouse only|just (the )?mouse|no typing/.test(t)) { setMode("mouse"); did.push("mouse only"); }
   else if (/mouse and typ|both/.test(t)) { setMode("both"); did.push("mouse + typing"); }
-  if (/new project|generate|come up with|something new|fresh project/.test(t)) {
+  if (/loop|never stop|forever|everything|all of them/.test(t)) {
+    $("source").value = "mixed"; toggleBoxes(); syncQuickProject();
+    did.push("loop forever: new projects + library projects");
+  } else if (/new project|generate|come up with|something new|fresh project/.test(t)) {
     $("source").value = "generated"; toggleBoxes(); syncQuickProject();
     const langs = [["python", /python/], ["go", /\bgo(lang)?\b/], ["typescript", /typescript|\bts\b/]].filter(([, re]) => re.test(t)).map(([l]) => l);
     if (langs.length) document.querySelectorAll("#gen_langs input").forEach((i) => i.checked = langs.includes(i.value));
@@ -1349,11 +1354,12 @@ $("send").onclick = () => {
 };
 function syncQuickProject() {
   const sel = selectedProjects();
-  $("qProject").innerHTML = `<option value="__gen__">New project every time</option><option value="">All library projects</option>` +
+  $("qProject").innerHTML = `<option value="__loop__">Loop forever (new + library)</option><option value="__gen__">New project every time</option><option value="">All library projects</option>` +
     projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
-  $("qProject").value = $("source").value === "generated" ? "__gen__" : sel.length === 1 ? sel[0] : "";
+  $("qProject").value = $("source").value === "mixed" ? "__loop__" : $("source").value === "generated" ? "__gen__" : sel.length === 1 ? sel[0] : "";
 }
 $("qProject").onchange = () => {
+  if ($("qProject").value === "__loop__") { $("source").value = "mixed"; toggleBoxes(); saveSettings(); return; }
   if ($("qProject").value === "__gen__") { $("source").value = "generated"; toggleBoxes(); saveSettings(); return; }
   $("source").value = "projects"; toggleBoxes(); setSelectedProjects($("qProject").value ? [$("qProject").value] : []); saveSettings(); if ($("qProject").value) browse($("qProject").value); };
 $("qMode").onchange = () => { setMode($("qMode").value); saveSettings(); };

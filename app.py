@@ -7,7 +7,7 @@ Invotech 360 control panel, served at http://localhost:8765
     python app.py --port 9000 --no-browser --no-editor
 
 Kill switch (anywhere): press Esc twice quickly. F9 = pause/resume.
-Emergency stop: shove the mouse into a corner of the screen.
+It never stops on its own: only Esc Esc, Stop, or the time limit end a run.
 """
 
 import argparse

@@ -29,7 +29,10 @@ from .projects import (guess_wait, list_projects, localize_command, project_comm
                        project_scaffold)
 from .snippets import LANGUAGES, pick_pool
 
-pyautogui.FAILSAFE = True  # mouse into a corner of the main screen = emergency stop
+# No corner "fail-safe": you share the mouse, so your cursor resting in a screen corner must
+# not end the run. The kill switch is Esc Esc (or Stop in the dashboard).
+pyautogui.FAILSAFE = False
+FailSafe = getattr(pyautogui, "FailSafeException", RuntimeError)
 pyautogui.PAUSE = 0
 
 NEIGHBORS = {
@@ -51,7 +54,7 @@ DOUBLE_ESC_WINDOW = 0.6  # seconds between the two Esc presses
 @dataclass
 class Config:
     editor: str = "vscode"             # vscode | notepad | focused
-    source: str = "generated"          # generated | projects | snippets | file
+    source: str = "mixed"              # mixed | generated | projects | snippets | file
     gen_languages: list = field(default_factory=lambda: ["python", "go", "typescript"])
     projects: list = field(default_factory=list)   # empty = all
     workspace_dir: str = "~/dev-projects"
@@ -104,8 +107,8 @@ class Config:
             c.mode = "both"
         if c.editor not in ("vscode", "notepad", "focused"):
             c.editor = "vscode"
-        if c.source not in ("generated", "projects", "snippets", "file"):
-            c.source = "generated"
+        if c.source not in ("mixed", "generated", "projects", "snippets", "file"):
+            c.source = "mixed"
         c.gen_languages = [l for l in c.gen_languages if l in GEN_LANGUAGES] or list(GEN_LANGUAGES)
         return c
 
@@ -138,6 +141,7 @@ class Bot:
         self.live = {"project": "", "files": [], "done": [], "file": "", "text": ""}
         self.terminal = deque(maxlen=400)   # output of commands the bot ran
         self.current_files = {}             # rel path -> source of the project being written
+        self._job_iter = None               # the never-ending project rotation
         # _hands set = the bot may send keystrokes (cleared when you type, or click into
         # another window); _mouse set = the bot may move the mouse (cleared while you move it)
         self._hands = threading.Event()
@@ -286,6 +290,7 @@ class Bot:
         self._reset_stats()
         self.live = {"project": "", "files": [], "done": [], "file": "", "text": ""}
         self.terminal.clear()
+        self._job_iter = None
         self._hands.set()
         self._mouse.set()
         self._bg_ready = False
@@ -513,8 +518,7 @@ class Bot:
             self.log(f"Using {self.monitor.label()}")
             if cfg.auto_open_editor and cfg.mode != "mouse":
                 if not self.open_editor():
-                    self.log("Editor could not be opened - stopping.")
-                    return
+                    self.log("Editor could not be opened yet - carrying on, will try again with each file")
             if cfg.start_delay:
                 self.log(f"Starting in {cfg.start_delay:.0f}s...")
                 if not self._wait(cfg.start_delay):
@@ -554,16 +558,30 @@ class Bot:
             self.event("stop", "Agent stopped", "")
 
     def _safe(self, fn):
-        try:
-            fn()
-        except pyautogui.FailSafeException:
-            self.log("Fail-safe triggered (mouse in a corner of the main screen)")
-            self._stop.set()
-            self._run.set()
-        except Exception as exc:  # noqa: BLE001
-            self.log(f"Error in {fn.__name__}: {exc!r}")
-            self._stop.set()
-            self._run.set()
+        """Run a worker forever: if it hits an error (or ever runs out of work) it starts
+        again after a short pause. Only Stop / Esc Esc / the time limit end the run."""
+        failures = 0
+        while not self._stop.is_set():
+            try:
+                fn()
+                if self._stop.is_set():
+                    return
+                self.log(f"{fn.__name__.strip('_').replace('_', ' ')} finished - starting the next round")
+                failures = 0
+                delay = 3
+            except FailSafe:
+                # your cursor is in a screen corner: treat it as "you have the mouse"
+                self._last_mouse = time.time()
+                self._mouse.clear()
+                delay = 1
+            except Exception as exc:  # noqa: BLE001
+                failures += 1
+                delay = min(60, 5 * failures)
+                self.log(f"Problem in {fn.__name__}: {exc!r} - recovering, carrying on in {delay}s")
+                self.event("warn", "Recovered from a problem", f"{exc!r} · carrying on in {delay}s")
+            self._need_refocus = True
+            if not self._wait(delay):
+                return
 
     # ---------------------------------------------------------------- mouse
     def _mouse_loop(self):
@@ -601,12 +619,17 @@ class Bot:
     def _jobs(self):
         """Yield (project, files, meta) forever. meta: scaffold files + terminal steps."""
         cfg = self.cfg
-        if cfg.source == "generated":
+        if cfg.source in ("generated", "mixed"):
+            # never ends: a new project, then (mixed) the next library project, and so on
+            library = project_cycle(cfg.projects) if cfg.source == "mixed" and list_projects() else None
             for p in generated_cycle(only=cfg.gen_languages):
                 self.log(f"New project idea: {p['name']} - {p['title']} in {p['language']}, "
                          f"{len(p['records'])} record types, "
                          f"{sum(t.count(chr(10)) for _, t in p['files']):,} lines")
                 yield p["name"], p["files"], p
+                if library is not None:
+                    name, files = next(library)
+                    yield name, files, {"scaffold": project_scaffold(name, [r for r, _ in files])}
             return
         for job in self._library_jobs():
             if len(job) == 2:
@@ -857,7 +880,9 @@ class Bot:
         return True
 
     def _type_loop(self):
-        for project, files, meta in self._jobs():
+        if self._job_iter is None:          # one rotation per run: survives recoveries
+            self._job_iter = self._jobs()
+        for project, files, meta in self._job_iter:
             if not self._gate():
                 return
             with self._act():

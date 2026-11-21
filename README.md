@@ -126,9 +126,19 @@ python code_bot.py --monitor 3
 Screens are numbered left to right. VS Code is moved to that screen and maximized there, and
 the bot's mouse never leaves it. "Auto" picks a side screen (not your main one).
 
+## It never stops
+
+Once started, Invotech 360 keeps going until **you** stop it (Esc Esc, Stop, or the optional
+time limit). By default ("Loop forever" in Settings > What to write) it writes a brand-new
+project, then the next project from the library, then another new one, round and round.
+When a project is finished it moves straight on to the next one; if anything goes wrong (a
+file can't be written, a command fails, VS Code is slow to open) it notes it in the
+Activity log and carries on a few seconds later. Your cursor resting in a screen corner no
+longer stops it either.
+
 ## Projects: a new one every time
 
-By default the bot **comes up with a new project for every run** ("New project every time" in
+The bot **comes up with a new project for every run** ("New project every time" in
 Settings > What to write, or `new project` in the agent box). It picks one of 14 kinds of
 business app (library, clinic, hotel, fleet, school, warehouse, restaurant, gym, events, real
 estate, help desk, payroll, farm, shipping) and one of 3 languages:
