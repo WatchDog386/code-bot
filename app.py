@@ -32,6 +32,7 @@ except ImportError as exc:
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS = os.path.join(HERE, "settings.json")
 INDEX = os.path.join(HERE, "web", "index.html")
+FAVICON = os.path.join(HERE, "web", "favicon.png")
 
 bot = Bot()
 
@@ -42,6 +43,19 @@ def load_settings():
             return Config.from_dict(json.load(fh))
     except (OSError, ValueError):
         return Config()
+
+
+from codebot.schedule import Scheduler  # noqa: E402
+
+scheduler = Scheduler(bot, lambda: load_settings(), os.path.join(HERE, "usage.json"))
+
+
+def start_by_hand(body):
+    ok, msg = scheduler.allow_start()
+    if not ok:
+        bot.log(msg)
+        return False, msg
+    return bot.start(body)
 
 
 def save_settings(cfg_dict):
@@ -114,7 +128,12 @@ class Handler(BaseHTTPRequestHandler):
             with open(INDEX, "rb") as fh:
                 return self._send(200, fh.read(), "text/html; charset=utf-8")
         if self.path == "/api/status":
-            return self._send(200, bot.status())
+            st = bot.status()
+            st["schedule"] = scheduler.status()
+            return self._send(200, st)
+        if self.path in ("/favicon.ico", "/favicon.png"):
+            with open(FAVICON, "rb") as fh:
+                return self._send(200, fh.read(), "image/png")
         if self.path == "/api/settings":
             from dataclasses import asdict
             return self._send(200, {"config": asdict(load_settings()), "languages": LANGUAGES,
@@ -130,8 +149,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {"error": "forbidden"})
         body = self._body()
         routes = {
-            "/api/start": lambda: (save_settings(body), bot.start(body))[1],
-            "/api/stop": bot.stop,
+            "/api/start": lambda: (save_settings(body), start_by_hand(body))[1],
+            "/api/stop": lambda: bot.stop("user"),
             "/api/pause": bot.pause,
             "/api/resume": bot.resume,
             "/api/open-editor": lambda: (bot.open_editor(Config.from_dict(body) if body else load_settings()),
@@ -142,7 +161,19 @@ class Handler(BaseHTTPRequestHandler):
         if not fn:
             return self._send(404, {"error": "not found"})
         ok, msg = fn()
-        self._send(200, {"ok": bool(ok), "message": msg, "status": bot.status()})
+        st = bot.status()
+        st["schedule"] = scheduler.status()
+        self._send(200, {"ok": bool(ok), "message": msg, "status": st})
+
+
+def already_running(port):
+    """Is our own dashboard answering on this port?"""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=2) as r:
+            return "state" in json.loads(r.read())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def main():
@@ -151,16 +182,24 @@ def main():
     p.add_argument("--no-browser", action="store_true", help="don't open the dashboard")
     p.add_argument("--no-editor", action="store_true", help="don't open Notepad on launch")
     p.add_argument("--autostart", action="store_true", help="start the bot right away")
+    p.add_argument("--background", action="store_true",
+                   help="started at login / by the 3 AM task: no browser, no editor; the schedule decides")
+    p.add_argument("--no-schedule", action="store_true", help="don't start/stop by the daily schedule")
     args = p.parse_args()
+    url = f"http://localhost:{args.port}"
 
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError:
-        print(f"Port {args.port} is busy. Is Invotech 360 already running? "
+        if already_running(args.port):
+            # Invotech 360 is already running (it starts at login): just show the dashboard
+            if not args.background:
+                webbrowser.open(url)
+            sys.exit(0)
+        print(f"Port {args.port} is busy. Is something else using it? "
               f"Try: python app.py --port {args.port + 1}")
         sys.exit(1)
 
-    url = f"http://localhost:{args.port}"
     hot = bot.start_listeners()
     print("=" * 56)
     print(f"  Invotech 360 dashboard:  {url}")
@@ -170,13 +209,22 @@ def main():
     print("  Quit server: Ctrl+C")
     print("=" * 56, flush=True)
 
+    cfg = load_settings()
+    if cfg.schedule_enabled and not args.no_schedule:
+        st = scheduler.status()
+        print(f"  Schedule: every day from {cfg.schedule_start}, up to {cfg.daily_hours:g} hours "
+              f"({st['used_text']} used today; next start: {st['next_start_text']})", flush=True)
+    if not args.no_schedule:
+        scheduler.run_forever()
+    if args.background:
+        args.no_editor = args.no_browser = True
     if not args.no_editor:
         threading.Thread(target=lambda: bot.open_editor(load_settings()), daemon=True).start()
     if not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     if args.autostart:
         from dataclasses import asdict
-        threading.Timer(2.5, lambda: bot.start(asdict(load_settings()))).start()
+        threading.Timer(2.5, lambda: start_by_hand(asdict(load_settings()))).start()
 
     try:
         server.serve_forever()

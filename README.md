@@ -16,6 +16,33 @@ python -m pip install -r requirements.txt
   **Input Monitoring**. In VS Code run **"Shell Command: Install 'code' command in PATH"**.
 - Linux: X11 only; `sudo apt install python3-tk xdotool`.
 
+## Install: desktop icon, start at sign-in, every day at 3 AM
+
+Run this once (Windows: just double-click **install_windows.bat**):
+
+```bash
+python install.py
+```
+
+- **Windows**: puts an **Invotech 360** icon on your desktop, starts it quietly in the
+  background every time you sign in, and adds a Task Scheduler task that starts it every day at
+  03:00 and wakes the PC from sleep for it. It also starts it right away.
+- **macOS**: a LaunchAgent (at login and every day at 03:00) and a launcher on the desktop.
+- **Linux**: an autostart entry, a desktop launcher and a cron entry at 03:00.
+
+`python install.py --uninstall` removes all of it.
+
+**10 hours a day.** By default it starts at **03:00** and works until **13:00**. The 10 hours are
+a hard daily limit: they also count runs you start yourself, and once they're used up it won't
+start again until the next day's 03:00. If you press Stop (or Esc Esc), it stays off until the
+next day. Change the time and the hours under **Settings > Schedule**; it shows today's hours
+used and left, and when it starts next. The hours used are kept in `usage.json`.
+
+The computer must be **on (or asleep), signed in and unlocked** at 03:00: mouse and keyboard
+control can't work on a locked screen or the sign-in screen. Set Windows to not lock the screen
+(Settings > Accounts > Sign-in options) if it should work through the night. Logs are written
+to `logs/invotech360.log`.
+
 ## Run
 
 ```bash

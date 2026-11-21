@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Invotech 360</title>
+<link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -594,6 +595,7 @@
         <button data-tab="t-behavior" class="on">Behavior</button>
         <button data-tab="t-source">What to write</button>
         <button data-tab="t-screen">Screen &amp; workspace</button>
+        <button data-tab="t-schedule">Schedule</button>
       </div>
       <div class="cols c2" style="margin-top:0" id="t-behavior">
         <div class="panel">
@@ -672,6 +674,29 @@
               <div><label class="f">Notepad: clear every N lines</label><input type="number" id="clear_after_lines" min="0" step="10"></div>
             </div>
           </div>
+        </div>
+      </div>
+      <div class="cols c2 hidden" style="margin-top:0" id="t-schedule">
+        <div class="panel">
+          <div class="panel-head"><h2>Daily schedule</h2></div>
+          <div>
+            <div class="checks" style="grid-template-columns:1fr;margin-top:0"><label><input type="checkbox" id="schedule_enabled"> Start by itself every day</label></div>
+            <div class="row2">
+              <div><label class="f">Start at (this computer's time)</label><input type="time" id="schedule_start" style="width:100%;height:38px;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:0 10px"></div>
+              <div><label class="f">Hours a day (the limit, 0 = none)</label><input type="number" id="daily_hours" min="0" max="24" step="0.5"></div>
+            </div>
+            <p class="muted" style="margin:14px 0 0">It starts at this time and stops when the hours are used up or the day's window ends. The limit also counts runs you start yourself. If you press Stop, it stays off until the next day. To have it start when you sign in and at this time even if the app is closed, run <code>python install.py</code> once.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Today</h2></div>
+          <div class="minis" style="grid-template-columns:repeat(3,1fr)">
+            <div class="mini"><b id="sch_used">0h 00m</b><span>Worked today</span></div>
+            <div class="mini"><b id="sch_left">10h 00m</b><span>Left today</span></div>
+            <div class="mini"><b id="sch_next">03:00</b><span>Next start</span></div>
+          </div>
+          <div class="progress"><div id="sch_bar"></div></div>
+          <div class="muted" id="sch_note"></div>
         </div>
       </div>
       <div class="cols c2 hidden" style="margin-top:0" id="t-screen">
@@ -917,7 +942,7 @@ $("darkSwitch").onkeydown = (e) => { if (e.key === " " || e.key === "Enter") { e
 $("setTabs").onclick = (e) => {
   const b = e.target.closest("button"); if (!b) return;
   $("setTabs").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
-  ["t-behavior", "t-source", "t-screen"].forEach((id) => $(id).classList.toggle("hidden", id !== b.dataset.tab));
+  ["t-behavior", "t-source", "t-screen", "t-schedule"].forEach((id) => $(id).classList.toggle("hidden", id !== b.dataset.tab));
 };
 
 /* ================================================================ settings form */
@@ -949,6 +974,9 @@ function readForm() {
     run_terminal: $("run_terminal").checked,
     terminal_timeout: +$("terminal_timeout").value,
     mouse_resume: +$("mouse_resume").value,
+    schedule_enabled: $("schedule_enabled").checked,
+    schedule_start: $("schedule_start").value || "03:00",
+    daily_hours: +$("daily_hours").value,
     serve_seconds: +$("serve_seconds").value,
     maximize: $("maximize").checked,
     resume_after: +$("resume_after").value,
@@ -978,6 +1006,7 @@ function fillForm(c) {
                    "keep_finished", "maximize", "background_typing", "run_terminal"]) $(k).checked = !!c[k];
   $("terminal_timeout").value = c.terminal_timeout;
   $("mouse_resume").value = c.mouse_resume; $("serve_seconds").value = c.serve_seconds;
+  $("schedule_enabled").checked = !!c.schedule_enabled; $("schedule_start").value = c.schedule_start; $("daily_hours").value = c.daily_hours;
   $("resume_after").value = c.resume_after;
   $("think").value = c.think; $("thinkv").textContent = (+c.think).toFixed(1);
   $("monitor").innerHTML = '<option value="-1">Auto (a side screen)</option>' +
@@ -1470,6 +1499,21 @@ function render(st) {
                 ["Commands run", s.commands || 0], ["Scrolls", s.scrolls], ["Breaks taken", s.breaks], ["Times you took over", s.takeovers]];
   $("sessionRows").innerHTML = rows.map(([k, v]) => `<div class="prow"><span>${k}</span><b>${esc(v)}</b></div>`).join("");
 
+  const sc = st.schedule;
+  if (sc) {
+    $("sch_used").textContent = sc.used_text; $("sch_left").textContent = sc.left_text; $("sch_next").textContent = sc.next_start_text;
+    $("sch_bar").style.width = sc.hours ? Math.min(100, 100 * sc.used / (sc.hours * 3600)) + "%" : "0";
+    $("sch_note").textContent = !sc.enabled ? "The daily start is off; the hour limit still applies."
+      : sc.held ? `You stopped it today, so it starts again ${sc.next_start_text}.`
+      : `Working window today: ${sc.window}.`;
+    if (!st.running) {
+      $("railState").textContent = sc.enabled ? "Waiting for schedule" : "Idle";
+      $("railWhere").textContent = sc.enabled ? `Starts ${sc.next_start_text} · ${sc.left_text} left today` : "Nothing running";
+    } else {
+      $("railWhere").title = `${sc.used_text} worked today · ${sc.left_text} left`;
+    }
+    $("sbUpText").textContent = st.running ? `${fmt(s.uptime)} · ${sc.left_text} left` : `next ${sc.next_start_text}`;
+  }
   const log = $("log"); const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 10;
   log.textContent = st.logs.join("\n"); if (atBottom) log.scrollTop = log.scrollHeight;
   renderTerm();

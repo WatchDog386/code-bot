@@ -48,7 +48,8 @@ BLOCK_START = re.compile(
 CONTROL = ("if ", "for ", "while ", "switch", "try", "return", "else", "elif ", "case ", "catch")
 SNIPPET_EXT = {"python": "py", "javascript": "js", "typescript": "ts", "sql": "sql",
                "go": "go", "java": "java"}
-DOUBLE_ESC_WINDOW = 0.6  # seconds between the two Esc presses
+DOUBLE_ESC_WINDOW = 0.6
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")  # seconds between the two Esc presses
 
 
 @dataclass
@@ -83,6 +84,9 @@ class Config:
     auto_open_editor: bool = True
     keep_focus: bool = True
     minutes: float = 0
+    schedule_enabled: bool = True      # start by itself every day at schedule_start
+    schedule_start: str = "03:00"      # HH:MM, this computer's local time
+    daily_hours: float = 10.0          # most hours it may run per day (0 = no limit)
     start_delay: float = 3.0
 
     @classmethod
@@ -100,6 +104,12 @@ class Config:
         c.start_delay = max(0.0, float(c.start_delay))
         c.resume_after = max(0.0, float(c.resume_after))
         c.terminal_timeout = max(10.0, float(c.terminal_timeout))
+        c.daily_hours = max(0.0, min(24.0, float(c.daily_hours)))
+        try:
+            hh, mm = (int(v) for v in str(c.schedule_start).split(":"))
+            c.schedule_start = f"{max(0, min(23, hh)):02d}:{max(0, min(59, mm)):02d}"
+        except ValueError:
+            c.schedule_start = "03:00"
         c.mouse_resume = max(0.3, float(c.mouse_resume))
         c.serve_seconds = max(5.0, float(c.serve_seconds))
         c.monitor = int(c.monitor)
@@ -141,6 +151,8 @@ class Bot:
         self.live = {"project": "", "files": [], "done": [], "file": "", "text": ""}
         self.terminal = deque(maxlen=400)   # output of commands the bot ran
         self.current_files = {}             # rel path -> source of the project being written
+        self.stop_reason = ""               # why the last run ended
+        self.started_by = ""                # "user" or "schedule"
         self._job_iter = None               # the never-ending project rotation
         self._need_caret = False            # the bot clicked in the code: caret back to the end
         # _hands set = the bot may send keystrokes (cleared when you type, or click into
@@ -162,6 +174,16 @@ class Bot:
         line = time.strftime("%H:%M:%S ") + str(msg)
         self.logs.append(line)
         print(line, flush=True)
+        # also to a file: when it starts by itself at login / 3 AM there's no window to read
+        try:
+            path = os.path.join(LOG_DIR, "invotech360.log")
+            os.makedirs(LOG_DIR, exist_ok=True)
+            if os.path.exists(path) and os.path.getsize(path) > 2_000_000:
+                os.replace(path, path + ".old")
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(time.strftime("%Y-%m-%d ") + line + "\n")
+        except OSError:
+            pass
 
     def event(self, kind, title, detail=""):
         """A step for the dashboard's agent timeline (plan, create, write, verify, ...)."""
@@ -284,6 +306,8 @@ class Bot:
         if self.running:
             return False, "already running"
         self.cfg = Config.from_dict(cfg_dict)
+        self.stop_reason = ""
+        self.started_by = "user"
         self.make_editor()
         self._stop.clear()
         self._run.set()
@@ -301,9 +325,12 @@ class Bot:
         t.start()
         return True, "started"
 
-    def stop(self):
+    def stop(self, reason="user"):
+        """reason: "user" (Stop / Esc Esc - stays stopped until the next scheduled start)
+        or "schedule" (the daily window ended or the daily limit was reached)."""
+        self.stop_reason = reason
         if self.running:
-            self.log("Stopping...")
+            self.log("Stopping..." if reason == "user" else f"Stopping ({reason})")
         self._stop.set()
         self._run.set()
         self._hands.set()
@@ -549,6 +576,7 @@ class Bot:
             while not self._stop.is_set():
                 if self.stats["ends_at"] and time.time() >= self.stats["ends_at"]:
                     self.log("Time limit reached")
+                    self.stop_reason = "time limit"
                     self._stop.set()
                     self._run.set()
                 self._check_auto_resume()
