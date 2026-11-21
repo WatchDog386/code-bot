@@ -9,6 +9,7 @@ NotepadEditor - types into a dedicated scratch file in Notepad / TextEdit / gedi
 
 import json
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -137,6 +138,30 @@ class _WindowsFocus:
         except Exception:  # noqa: BLE001  (pygetwindow sometimes raises on success)
             pass
         return "refocused"
+
+
+def active_window_title():
+    """Title of the window that has keyboard focus, or None if we can't tell."""
+    try:
+        if IS_WIN:
+            import pygetwindow as gw
+            w = gw.getActiveWindow()
+            return w.title if w is not None else ""
+        if IS_MAC:
+            script = ('tell application "System Events" to set p to first application process whose frontmost is true\n'
+                      'tell application "System Events" to tell p\n'
+                      '  set t to name of p\n'
+                      '  try\n    set t to t & " | " & (name of front window)\n  end try\n'
+                      'end tell\nreturn t')
+            out = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=2)
+            return out.stdout.strip() if out.returncode == 0 else None
+        if shutil.which("xdotool"):
+            out = subprocess.run(["xdotool", "getactivewindow", "getwindowname"],
+                                 capture_output=True, text=True, timeout=2)
+            return out.stdout.strip() if out.returncode == 0 else None
+    except Exception:  # noqa: BLE001
+        pass
+    return None
 
 
 def place_window(rect, win_match=None, x_name=None, mac_process=None, mac_contains=None):
@@ -379,16 +404,50 @@ class VSCodeEditor:
             return None
         return _norm(typed) == _norm(expected)
 
+    def is_active(self):
+        """Is this VS Code window the one getting keystrokes? None = can't tell."""
+        title = active_window_title()
+        if title is None:
+            return None
+        if IS_MAC:
+            return title.startswith("Code") and self.root_name in title
+        return "Visual Studio Code" in title and self.root_name in title
+
+    def _palette(self, command, settle=1.0):
+        """Run a VS Code command through the command palette, typed like a person."""
+        mod = "command" if IS_MAC else "ctrl"
+        pyautogui.hotkey(mod, "shift", "p")
+        time.sleep(random.uniform(0.5, 0.9))
+        for ch in command:
+            pyautogui.write(ch)
+            time.sleep(random.uniform(0.03, 0.09))
+        time.sleep(random.uniform(0.4, 0.8))
+        pyautogui.press("enter")
+        time.sleep(settle)
+
+    def new_terminal(self):
+        """Open a fresh integrated terminal (Ctrl+Shift+`) - starts in the workspace folder."""
+        self.focus(force=True)
+        self._palette("Terminal: Create New Terminal", settle=2.5)
+
     def open_terminal(self):
         """Focus VS Code's integrated terminal (creates one if needed)."""
         self.focus(force=True)
-        mod = "command" if IS_MAC else "ctrl"
-        pyautogui.hotkey(mod, "shift", "p")
-        time.sleep(0.7)
-        pyautogui.write("Terminal: Focus Terminal", interval=0.03)
-        time.sleep(0.6)
+        self._palette("Terminal: Focus Terminal", settle=1.2)
+
+    def open_browser(self, url):
+        """Show the running app inside VS Code (Simple Browser)."""
+        self.focus(force=True)
+        self._palette("Simple Browser: Show", settle=1.0)
+        for ch in url:
+            pyautogui.write(ch)
+            time.sleep(random.uniform(0.03, 0.08))
+        time.sleep(0.4)
         pyautogui.press("enter")
         time.sleep(2.0)
+
+    def focus_editor(self):
+        self._palette("View: Focus Active Editor Group", settle=0.6)
 
     def clear(self):
         pass
@@ -498,6 +557,12 @@ class NotepadEditor:
         place_window(rect, win_match=self._title_match, x_name=SCRATCH_NAME,
                      mac_process="TextEdit", mac_contains=SCRATCH_NAME)
 
+    def is_active(self):
+        title = active_window_title()
+        if title is None:
+            return None
+        return os.path.splitext(SCRATCH_NAME)[0] in title
+
     def begin_project(self, name, interactive=True):
         self.log(f"New project: {name}")
 
@@ -526,6 +591,9 @@ class FocusedWindowEditor(NotepadEditor):
 
     def place(self, rect):
         pass
+
+    def is_active(self):
+        return None   # whatever window you choose is the target
 
     def focus(self, force=False):
         return "ok"

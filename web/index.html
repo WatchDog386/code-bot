@@ -621,7 +621,11 @@
             </div>
             <div class="row2">
               <div><label class="f">Auto-stop after (min, 0 = never)</label><input type="number" id="minutes" min="0" step="5"></div>
-              <div><label class="f">Continue after I'm idle (s, 0 = wait)</label><input type="number" id="resume_after" min="0" step="5"></div>
+              <div><label class="f">Take the keyboard back after I'm idle (s)</label><input type="number" id="resume_after" min="0" step="1"></div>
+            </div>
+            <div class="row2">
+              <div><label class="f">Take the mouse back after I stop (s)</label><input type="number" id="mouse_resume" min="0.3" step="0.5"></div>
+              <div><label class="f">Keep a started app running for (s)</label><input type="number" id="serve_seconds" min="5" step="15"></div>
             </div>
             <div class="checks">
               <label><input type="checkbox" id="scroll"> Random scrolling</label>
@@ -674,7 +678,7 @@
           <div>
             <label class="f" style="margin-top:0">Workspace folder (projects get created here)</label>
             <input type="text" id="workspace_dir" placeholder="~/dev-projects">
-            <div class="checks" style="grid-template-columns:1fr"><label><input type="checkbox" id="run_terminal"> Run the project's commands (build / tests) when it's finished</label></div>
+            <div class="checks" style="grid-template-columns:1fr"><label><input type="checkbox" id="run_terminal"> Open VS Code's terminal and build / test / run the project when it's finished</label></div>
             <label class="f">Stop a background command after (s)</label><input type="number" id="terminal_timeout" min="10" step="30">
             <div class="checks" style="grid-template-columns:1fr"><label><input type="checkbox" id="keep_finished"> Keep finished projects (off = only the current project)</label></div>
           </div>
@@ -934,6 +938,8 @@ function readForm() {
     background_typing: $("background_typing").checked,
     run_terminal: $("run_terminal").checked,
     terminal_timeout: +$("terminal_timeout").value,
+    mouse_resume: +$("mouse_resume").value,
+    serve_seconds: +$("serve_seconds").value,
     maximize: $("maximize").checked,
     resume_after: +$("resume_after").value,
     think: +$("think").value,
@@ -960,6 +966,7 @@ function fillForm(c) {
   for (const k of ["scroll", "breaks", "auto_open_editor", "keep_focus", "review_moves", "detect_user",
                    "keep_finished", "maximize", "background_typing", "run_terminal"]) $(k).checked = !!c[k];
   $("terminal_timeout").value = c.terminal_timeout;
+  $("mouse_resume").value = c.mouse_resume; $("serve_seconds").value = c.serve_seconds;
   $("resume_after").value = c.resume_after;
   $("think").value = c.think; $("thinkv").textContent = (+c.think).toFixed(1);
   $("monitor").innerHTML = '<option value="-1">Auto (a side screen)</option>' +
@@ -1194,12 +1201,12 @@ function nowLine() {
   if (st.state === "starting") txt = "Starting up…";
   else if (st.state === "you" && live.background) txt = `You're working · still writing ${live.file || "code"} in the background` + (live.file ? ` (line ${live.line}/${live.lines_total})` : "") + (s.resume_in ? ` · takes the keyboard back after ${s.resume_in}s idle` : "");
   else if (st.state === "you") { txt = s.resume_in ? `You have control · continues after ${s.resume_in}s idle` : "You have control · press Resume"; spin = false; }
-  else if (live.activity === "terminal") txt = "Running the project's commands…";
+  else if (live.activity === "terminal") txt = "Working in the terminal…";
   else if (st.state === "paused") { txt = "Paused"; spin = false; }
   else if (st.state === "break") txt = "On a short break…";
   else if (live.activity === "thinking") txt = `Thinking about ${live.file ? live.file.split("/").pop() : "the next step"}…`;
   else if (live.activity === "reviewing") txt = "Reviewing before the next file…";
-  else if (live.file) txt = `Writing ${live.file} · line ${live.line} of ${live.lines_total}`;
+  else if (live.file) txt = `Writing ${live.file} · line ${live.line} of ${live.lines_total}` + (live.mouse === false ? " · you have the mouse" : "");
   else txt = "Moving the mouse…";
   return `<div class="now">${spin ? '<i class="spin"></i>' : ic(st.state === "you" ? "user" : "pause")}<span>${esc(txt)}</span></div>`;
 }
@@ -1240,7 +1247,7 @@ const HELP = `Here's what I understand:
 <code>typing only</code> · <code>mouse only</code> · <code>mouse and typing</code>
 <code>snippets python go</code> — short snippets instead of projects
 <code>all projects</code> · <code>open editor</code> · <code>preview</code> · <code>status</code>
-While you use your mouse/keyboard I let go of them, and the code keeps being written into the file in the background.`;
+Move the mouse any time: I let go of it and keep typing. If you type or click into another window, I keep writing the file in the background.`;
 async function runCommand(raw) {
   const text = raw.trim(); if (!text) return;
   say(text); renderSteps();
@@ -1366,7 +1373,8 @@ function render(st) {
   if (!st) return;
   lastStatus = st;
   const state = st.state, s = st.stats;
-  const label = state === "you" && live.background ? "You're working · bot writes in background" : (STATE_LABEL[state] || state);
+  const label = state === "you" && live.background ? "You have the keyboard · bot writes in background"
+    : state === "running" && live.mouse === false ? "You have the mouse · bot keeps typing" : (STATE_LABEL[state] || state);
   for (const el of [$("state"), $("runPill")]) { el.textContent = state === "you" ? "you" : state; el.className = "pill " + state; }
   $("railDot").className = "dot " + state; $("runDot").className = "dot " + state;
   $("railState").textContent = label; $("sbStateText").textContent = label;

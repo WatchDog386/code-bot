@@ -63,29 +63,48 @@ light/dark), with a coding-agent workspace in the style of Cursor / Windsurf:
 
 - **Kill switch: press `Esc` twice quickly** (anywhere). Or **Stop** in the dashboard.
 - **F9** pauses / resumes.
-- **Just use your computer.** The moment you touch the mouse or keyboard the bot lets go of
-  both: the mouse stops moving and no more keystrokes are sent, so nothing lands in the window
-  you're working in. **The code keeps being written anyway**: the bot writes it straight into the
-  file on disk, word by word at the same pace, and VS Code shows the file growing. New files
-  appear in VS Code's explorer. When you've left the mouse and keyboard alone for 20 seconds
-  (configurable) it brings VS Code back, opens the file it's on, puts the cursor at the end
-  and carries on typing for real. Pressing **Resume** gives it the keyboard back straight away.
+- **Share the mouse.** Move the mouse whenever you like: the bot lets go of it at once but
+  **keeps typing in VS Code with real keystrokes**, exactly as before (moving the mouse doesn't
+  change which window gets the keys). About 1 second after you stop moving it, the bot takes
+  the mouse back ("Take the mouse back after I stop" in Settings). Clicking inside VS Code is
+  fine too: the bot puts its cursor back at the end of the file and carries on.
+- **Your keyboard / other windows.** If you start typing, or click into another window, the bot
+  stops sending keystrokes before the next key (they would land in your window) and keeps
+  writing the file on disk character by character instead; VS Code shows it growing. After you
+  have been idle for 5 seconds ("Take the keyboard back after I'm idle") it brings VS Code back
+  and carries on typing for real from the same spot. **Resume** gives it back at once.
   Don't type in the file the bot is writing while it works in the background.
-  (Turn this off with "Keep writing code while I work". Notepad mode always pauses instead.)
+  (Turn this off with "Keep writing code while I work". Notepad mode pauses instead.)
 - `Ctrl+C` in the terminal quits the server.
 
 ## Terminal
 
-When a project is finished the bot runs its commands, like a developer checking their work:
+When a project is finished the bot works in the terminal like a developer:
 
-- **Bot has the keyboard:** it opens VS Code's own terminal (`Terminal: Focus Terminal`), `cd`s
-  into the project and types each command.
-- **You're busy (or not VS Code):** the commands run in the background, and the output shows up in
-  the dashboard's **Terminal** tab with the exit code.
+- **Bot has the keyboard:** it opens a new VS Code terminal (`Terminal: Create New Terminal`),
+  `cd`s into the project and types each command: install, tests, build. Then it **starts the
+  app** and opens it in **VS Code's built-in browser** (`Simple Browser`), leaves it running for
+  a while (45 s, "Keep a started app running for"), and stops it with `Ctrl+C`.
+- **You have the keyboard (or not VS Code):** the same steps run in the background; the output,
+  exit codes and whether the app answered show in the dashboard's **Terminal** tab.
 
-Commands come from a `.codebot-run` file in the project (one per line, `#` for comments).
-Without one, Go projects get `go build ./...` and Python projects get `python -m compileall -q .`.
-The sample projects run their tests. Turn this off under Settings > Screen & workspace.
+The steps come from a `.codebot-run` file in the project:
+
+```
+python -m venv .venv
+{venv}python -m pip install -q -r requirements.txt   # wait 60
+{venv}python -m pytest -q
+serve: {venv}python -m uvicorn main:app --port 8000
+open: http://127.0.0.1:8000/docs
+```
+
+`serve:` = the app itself (left running, then stopped), `open:` = the page shown in VS Code,
+`# wait N` = seconds to give a command in VS Code's terminal (the bot can't read that terminal),
+`{venv}` = the project's virtualenv (`.venv\Scripts\` on Windows, `.venv/bin/` elsewhere).
+Without the file, Go projects get `go build ./...` and Python projects `python -m compileall -q .`.
+The samples: task-tracker-api installs, tests and runs its API (docs page), link-shortener vets,
+tests and runs its server, inventory-dashboard installs and type-checks.
+Turn it off under Settings > Screen & workspace.
 
 ## Live preview
 

@@ -6,7 +6,9 @@ An optional `.codebot-order` file lists the files in the order to type them.
 
 import os
 import random
+import re
 import shutil
+import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECTS_DIR = os.path.join(HERE, "projects")
@@ -94,25 +96,61 @@ def project_cycle(selected=None):
 
 
 def project_commands(name):
-    """Commands to run once a project is written (build, tests...).
+    """What to run once a project is written, as steps:
+    {"cmd": str, "serve": bool, "open": url or None, "wait": seconds or None}.
 
-    A `.codebot-run` file in the project lists them, one per line (# for comments).
+    A `.codebot-run` file in the project lists them, one per line (# for comments):
+        python -m pytest -q            # wait 30   <- optional: seconds to give it
+        serve: python -m uvicorn main:app --port 8000   <- the app itself, left running a while
+        open: http://127.0.0.1:8000/docs                <- shown in VS Code's browser
     Without one, a safe default is picked from the project type.
     """
     root = os.path.join(PROJECTS_DIR, name)
     run_file = os.path.join(root, ".codebot-run")
+    lines = []
     if os.path.exists(run_file):
         with open(run_file, encoding="utf-8") as fh:
-            return [l.strip() for l in fh if l.strip() and not l.lstrip().startswith("#")]
-    if os.path.exists(os.path.join(root, "go.mod")):
-        return ["go build ./..."]
-    if any(f.endswith(".py") for _, _, fs in os.walk(root) for f in fs):
-        return ["python -m compileall -q ."]
-    return []
+            lines = [l.strip() for l in fh if l.strip() and not l.lstrip().startswith("#")]
+    elif os.path.exists(os.path.join(root, "go.mod")):
+        lines = ["go build ./..."]
+    elif any(f.endswith(".py") for _, _, fs in os.walk(root) for f in fs):
+        lines = ["python -m compileall -q ."]
+    steps = []
+    for line in lines:
+        wait = None
+        m = re.search(r"\s+#\s*wait\s+(\d+)\s*$", line)
+        if m:
+            wait = int(m.group(1))
+            line = line[:m.start()].rstrip()
+        low = line.lower()
+        if low.startswith("open:"):
+            if steps and steps[-1]["serve"]:
+                steps[-1]["open"] = line[5:].strip()
+            continue
+        serve = low.startswith("serve:")
+        if serve:
+            line = line[6:].strip()
+        steps.append({"cmd": line, "serve": serve, "open": None, "wait": wait})
+    return steps
 
 
 def localize_command(cmd):
-    """`python` is often called `python3` on macOS / Linux."""
+    """Make a command right for this computer: `{venv}` = the project's virtualenv
+    scripts folder, and `python` is often called `python3` on macOS / Linux."""
+    win = sys.platform.startswith("win")
+    cmd = cmd.replace("{venv}", ".venv\\Scripts\\" if win else ".venv/bin/")
     if cmd.startswith("python ") and not shutil.which("python") and shutil.which("python3"):
         return "python3 " + cmd[len("python "):]
     return cmd
+
+
+def guess_wait(cmd):
+    """Roughly how long a command takes (the bot can't read VS Code's terminal)."""
+    low = cmd.lower()
+    if "install" in low or "venv" in low:
+        return 45
+    if "test" in low:
+        return 25
+    if any(w in low for w in ("build", "vet", "tsc", "compile", "lint")):
+        return 15
+    return 12
