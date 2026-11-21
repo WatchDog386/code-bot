@@ -41,6 +41,24 @@ Other commands:
 
 Or press **F5** in VS Code and pick a "code-bot" launch config.
 
+## The dashboard
+
+Laid out like the Optimas MS desktop app (navy side rail, white top bar, KPI cards, hairline panels,
+light/dark), with a coding-agent workspace in the style of Cursor / Windsurf:
+
+- **Agent** - an IDE view. The explorer shows the project being written (files tick off as they are
+  done), the editor shows the code live as it is typed, with syntax highlighting and a cursor,
+  and the agent panel lists each step (planned, created, thinking, verified...). There is also an
+  Output / Problems / Session panel and a VS Code-style status bar. Click any file to open it in a
+  tab.
+- **Ask the agent** - type in the agent box, e.g. `write link-shortener at 60 wpm`, `typing only`,
+  `pause`, `stop`, `status` or `help`.
+- **Command palette** - `Ctrl+K` (or `Ctrl+Shift+P`) runs any action or opens any file.
+- **Overview** - KPI cards and the current run. **Projects** - choose and preview projects.
+  **Activity** - full timeline and raw log. **Settings** - every option.
+- Shortcuts: `Ctrl+Enter` start, `Ctrl+.` stop, `Ctrl+L` ask the agent, `Ctrl+J` bottom panel,
+  `Ctrl+B` explorer.
+
 ## Stop / take over
 
 - **Kill switch: press `Esc` twice quickly** (anywhere). Or **Stop** in the dashboard.

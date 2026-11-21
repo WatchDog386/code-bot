@@ -16,11 +16,12 @@ import os
 import sys
 import threading
 import webbrowser
+from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
     from codebot.engine import Bot, Config, monitors_info
-    from codebot.projects import list_projects
+    from codebot.projects import list_projects, project_files
     from codebot.snippets import LANGUAGES
 except ImportError as exc:
     print(f"Missing dependency ({exc}). Run:\n    python -m pip install -r requirements.txt")
@@ -73,6 +74,29 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):
+        url = urlparse(self.path)
+        q = {k: v[0] for k, v in parse_qs(url.query).items()}
+        if url.path == "/api/live":
+            try:
+                since = int(q.get("since", 0))
+            except ValueError:
+                since = 0
+            return self._send(200, bot.live_status(since))
+        if url.path == "/api/project":
+            name = q.get("name", "")
+            if name not in list_projects():
+                return self._send(404, {"error": "no such project"})
+            files = project_files(name)
+            return self._send(200, {"name": name, "files": [
+                {"path": rel, "lines": text.count("\n") + 1, "bytes": len(text)} for rel, text in files]})
+        if url.path == "/api/file":
+            name = q.get("project", "")
+            if name not in list_projects():
+                return self._send(404, {"error": "no such project"})
+            for rel, text in project_files(name):
+                if rel == q.get("path"):
+                    return self._send(200, {"path": rel, "text": text})
+            return self._send(404, {"error": "no such file"})
         if self.path in ("/", "/index.html"):
             with open(INDEX, "rb") as fh:
                 return self._send(200, fh.read(), "text/html; charset=utf-8")

@@ -117,6 +117,11 @@ class Bot:
         self._need_refocus = False
         self._listeners = []
         human.on_interfere = lambda: self._user_input("mouse")
+        # live mirror of the work, for the dashboard's editor / agent panels
+        self.events = deque(maxlen=200)
+        self._event_id = 0
+        self.activity = ""
+        self.live = {"project": "", "files": [], "done": [], "file": "", "text": ""}
         self._reset_stats()
 
     # ------------------------------------------------------------ utilities
@@ -124,6 +129,19 @@ class Bot:
         line = time.strftime("%H:%M:%S ") + str(msg)
         self.logs.append(line)
         print(line, flush=True)
+
+    def event(self, kind, title, detail=""):
+        """A step for the dashboard's agent timeline (plan, create, write, verify, ...)."""
+        self._event_id += 1
+        self.events.append({"id": self._event_id, "t": time.time(), "kind": kind,
+                            "title": title, "detail": detail})
+
+    def live_status(self, since=0):
+        lv = self.live
+        return {"project": lv["project"], "files": lv["files"], "done": lv["done"],
+                "file": lv["file"], "text": lv["text"], "activity": self.activity,
+                "line": self.stats["line"], "lines_total": self.stats["lines_total"],
+                "events": [e for e in self.events if e["id"] > since]}
 
     def _reset_stats(self):
         self.stats = {"chars": 0, "lines": 0, "files": 0, "projects": 0, "mouse_moves": 0,
@@ -213,6 +231,7 @@ class Bot:
         self._run.set()
         self._user_paused = False
         self._reset_stats()
+        self.live = {"project": "", "files": [], "done": [], "file": "", "text": ""}
         self.state = "starting"
         t = threading.Thread(target=self._main, daemon=True, name="codebot-main")
         self._threads = [t]
@@ -233,6 +252,7 @@ class Bot:
             self._run.clear()
             self.state = "paused"
             self.log("Paused")
+            self.event("pause", "Paused", "")
         return True, self.state
 
     def resume(self):
@@ -242,6 +262,7 @@ class Bot:
             self._run.set()
             self.state = "running"
             self.log("Resumed")
+            self.event("resume", "Resumed", "")
         return True, self.state
 
     def toggle_pause(self):
@@ -338,6 +359,7 @@ class Bot:
             after = (f"resumes after {self.cfg.resume_after:.0f}s idle" if self.cfg.resume_after
                      else "press Resume / F9 to continue")
             self.log(f"You took over the {what} - bot paused ({after})")
+            self.event("you", f"You took over the {what}", after)
 
     def _check_auto_resume(self):
         if (self.state == "you" and self.cfg.resume_after and not self._user_paused
@@ -377,6 +399,7 @@ class Bot:
             self.state = "running"
             self.log(f"Running: {cfg.mode}, {cfg.source} -> {self.editor.name}, {cfg.wpm} wpm")
             self.log("Kill switch: press Esc twice. F9 pauses.")
+            self.event("start", "Agent started", f"{cfg.mode} · {cfg.source} -> {self.editor.name or self.editor.kind} · {cfg.wpm} wpm")
 
             workers = []
             if cfg.mode in ("both", "mouse"):
@@ -400,7 +423,9 @@ class Bot:
                 w.join(timeout=3)
         finally:
             self.state = "stopped"
+            self.activity = ""
             self.log("Stopped")
+            self.event("stop", "Agent stopped", "")
 
     def _safe(self, fn):
         try:
@@ -509,6 +534,7 @@ class Bot:
                 time.sleep(base * random.uniform(1, 2.5))
                 self.stats["typos"] += 1
             pyautogui.write(ch)
+            self.live["text"] += ch
             self.stats["chars"] += 1
             time.sleep(self._char_delay(ch, base))
             # hesitation: back up over the last few characters and retype them
@@ -567,7 +593,11 @@ class Bot:
                 return False
             # energy drifts slowly over the session (focused vs tired)
             self._energy = min(1.25, max(0.75, self._energy + random.uniform(-0.03, 0.03)))
-            if not self._wait(self._line_pause(line) / self._energy):
+            pause = self._line_pause(line) / self._energy
+            self.activity = "thinking" if pause > 1.5 else "typing"
+            if pause > 5:
+                self.event("think", "Thinking", f"{pause:.0f}s before line {idx + 1}")
+            if not self._wait(pause):
                 return False
             base = 60.0 / (cfg.wpm * 5) / self._energy * random.lognormvariate(0, 0.12)
             stripped = line.lstrip(" ")
@@ -582,10 +612,13 @@ class Bot:
                 for _ in range(indent):
                     pyautogui.press("space")
                     time.sleep(base * random.uniform(0.15, 0.35))
+                self.live["text"] += " " * indent
+                self.activity = "typing"
                 if not self._type_text(stripped, base):
                     return False
                 if idx < len(lines) - 1 or ends_with_newline:
                     pyautogui.press("enter")
+                    self.live["text"] += "\n"
             self.stats["lines"] += 1
             self.stats["line"] = idx + 1
             lines_since_clear += 1
@@ -593,6 +626,7 @@ class Bot:
                     and lines_since_clear >= cfg.clear_after_lines):
                 with self._act():
                     self.editor.clear()
+                self.live["text"] = ""
                 lines_since_clear = 0
             if cfg.review_moves and self.editor.kind != "focused" and stripped and random.random() < 0.03:
                 with self._act():
@@ -614,10 +648,15 @@ class Bot:
                 self.editor.begin_project(project)
             self.stats.update(project=project, files_total=len(files), file_index=0)
             self.stats["projects"] += 1
+            self.live.update(project=project, files=[r for r, _ in files], done=[], file="", text="")
+            self.event("plan", f"Planned {project}", f"{len(files)} files: " +
+                       ", ".join(r for r, _ in files[:6]) + (" ..." if len(files) > 6 else ""))
             for i, (rel, content) in enumerate(files, 1):
                 if not self._gate():
                     return
                 self.stats.update(file=rel, file_index=i, line=0)
+                self.live.update(file=rel, text="")
+                self.event("create", f"Created {rel}", f"{content.count(chr(10)) + 1} lines")
                 self.log(f"Writing {project}/{rel}")
                 with self._act():
                     path = self.editor.begin_file(rel)
@@ -627,14 +666,19 @@ class Bot:
                 with self._act():
                     ok = self.editor.end_file(path, content)
                 self.stats["files"] += 1
+                self.live["done"].append(rel)
                 if ok is True:
                     self.stats["verified"] += 1
+                    self.event("verify", f"Verified {rel}", "saved file matches the source")
                 elif ok is False:
+                    self.event("warn", f"{rel} differs", "you typed in it, or the editor changed something")
                     self.stats["mismatched"] += 1
                     self.log(f"  {rel}: saved file differs from source (you typed in it, or the editor changed something)")
+                self.activity = "reviewing"
                 if not self._wait(random.uniform(6, 20) * self.cfg.think):   # between files
                     return
             self.log(f"Finished project {project}")
+            self.event("done", f"Finished {project}", f"{len(files)} files written")
             if not self._wait(random.uniform(25, 60) * self.cfg.think):
                 return
 
@@ -645,6 +689,7 @@ class Bot:
                 continue
             dur = random.uniform(20, 90)
             self.log(f"Taking a {dur:.0f}s break")
+            self.event("break", "Short break", f"{dur:.0f}s")
             self.stats["breaks"] += 1
             self._run.clear()
             self.state = "break"
