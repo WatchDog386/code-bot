@@ -1,0 +1,10 @@
+README.md
+requirements.txt
+app/__init__.py
+app/config.py
+app/models.py
+app/repository.py
+app/services.py
+app/api.py
+main.py
+tests/test_services.py

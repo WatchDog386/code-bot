@@ -58,6 +58,12 @@
   .muted { color: var(--muted); font-size: 12px; }
   kbd { background: #1f2430; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
   .full { grid-column: 1 / -1; }
+  .progress { margin-top: 14px; }
+  .ptext { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; margin: 4px 0; }
+  .ptext #p_where { font-family: ui-monospace, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar { height: 8px; background: #12151b; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .bar div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--green)); transition: width .4s; }
+  .hidden { display: none; }
 </style>
 </head>
 <body>
@@ -66,7 +72,7 @@
     <h1>code-bot</h1>
     <span id="state" class="pill">idle</span>
     <div class="spacer"></div>
-    <span class="muted"><kbd>F9</kbd> pause · <kbd>F10</kbd>/<kbd>Esc</kbd> stop · mouse to top-left = emergency stop</span>
+    <span class="muted"><kbd>F9</kbd> pause · <kbd>F10</kbd>/<kbd>Esc</kbd> stop · mouse into a corner = emergency stop</span>
   </header>
 
   <div class="grid">
@@ -75,7 +81,7 @@
         <button id="start" class="primary">▶ Start</button>
         <button id="pause">❚❚ Pause</button>
         <button id="stop" class="danger">■ Stop</button>
-        <button id="openEditor">Open Notepad</button>
+        <button id="openEditor">Open editor</button>
         <div class="spacer"></div>
         <span class="muted" id="info"></span>
       </div>
@@ -84,10 +90,15 @@
         <div class="stat"><b id="s_chars">0</b><span>characters typed</span></div>
         <div class="stat"><b id="s_lines">0</b><span>lines</span></div>
         <div class="stat"><b id="s_mouse">0</b><span>mouse moves</span></div>
-        <div class="stat"><b id="s_snippets">0</b><span>snippets</span></div>
+        <div class="stat"><b id="s_projects">0</b><span>projects</span></div>
         <div class="stat"><b id="s_typos">0</b><span>typos fixed</span></div>
-        <div class="stat"><b id="s_lang">–</b><span>language</span></div>
+        <div class="stat"><b id="s_files">0</b><span>files written</span></div>
         <div class="stat"><b id="s_left">∞</b><span>time left</span></div>
+      </div>
+      <div class="progress">
+        <div class="ptext"><span id="p_where">Not started</span><span id="p_line" class="muted"></span></div>
+        <div class="bar"><div id="p_bar"></div></div>
+        <div class="ptext muted"><span id="p_files"></span><span id="p_verify"></span></div>
       </div>
     </section>
 
@@ -108,25 +119,52 @@
       </div>
       <div class="row">
         <div><label>Auto-stop after (min, 0 = never)</label><input type="number" id="minutes" min="0" step="5"></div>
-        <div><label>Clear file every N lines (0 = never)</label><input type="number" id="clear_after_lines" min="0" step="10"></div>
+        <div><label>Notepad: clear every N lines</label><input type="number" id="clear_after_lines" min="0" step="10"></div>
       </div>
       <div class="checks">
         <label><input type="checkbox" id="scroll"> Random scrolling</label>
         <label><input type="checkbox" id="breaks"> Short random breaks</label>
-        <label><input type="checkbox" id="auto_open_editor"> Auto-open Notepad</label>
-        <label><input type="checkbox" id="keep_focus"> Keep Notepad focused</label>
-        <label><input type="checkbox" id="strip_indent"> Editor auto-indents</label>
+        <label><input type="checkbox" id="auto_open_editor"> Auto-open editor</label>
+        <label><input type="checkbox" id="keep_focus"> Keep editor focused</label>
+        <label><input type="checkbox" id="review_moves"> Re-read code (arrow up/down)</label>
       </div>
     </section>
 
     <section class="card">
-      <h2>Code to type</h2>
-      <div class="langs" id="langs"></div>
-      <label>…or type your own file (full path, optional)</label>
-      <input type="text" id="custom_file" placeholder="C:\Users\me\projects\app\main.py">
+      <h2>What to write</h2>
+      <div class="row">
+        <div><label>Editor</label>
+          <select id="editor">
+            <option value="vscode">VS Code (real project)</option>
+            <option value="notepad">Notepad / TextEdit</option>
+            <option value="focused">Whatever window is focused</option>
+          </select></div>
+        <div><label>Source</label>
+          <select id="source">
+            <option value="projects">Projects library</option>
+            <option value="snippets">Short snippets</option>
+            <option value="file">My own file</option>
+          </select></div>
+      </div>
+      <div id="box_projects">
+        <label>Projects (none ticked = all, cycles forever)</label>
+        <div class="langs" id="projects"></div>
+      </div>
+      <div id="box_snippets" class="hidden">
+        <label>Languages</label>
+        <div class="langs" id="langs"></div>
+      </div>
+      <div id="box_file" class="hidden">
+        <label>File to type (full path)</label>
+        <input type="text" id="custom_file" placeholder="C:\Users\me\projects\app\main.py">
+      </div>
+      <div id="box_ws">
+        <label>VS Code workspace folder (projects get created here)</label>
+        <input type="text" id="workspace_dir" placeholder="~/dev-projects">
+      </div>
       <label>Start delay (seconds)</label>
       <input type="number" id="start_delay" min="0" step="1">
-      <p class="muted">The bot types into its own scratch file (<code id="scratch"></code>), never into your real notes.</p>
+      <p class="muted">Add your own projects by dropping folders into <code>projects/</code>. The bot only deletes project folders it created itself.</p>
     </section>
 
     <section class="card full">
@@ -138,12 +176,20 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-let languages = [];
+let languages = [], projects = [];
 
 function fmt(sec) {
   sec = Math.max(0, Math.floor(sec));
   const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
   return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
+}
+
+function toggleBoxes() {
+  const src = $("source").value;
+  $("box_projects").classList.toggle("hidden", src !== "projects");
+  $("box_snippets").classList.toggle("hidden", src !== "snippets");
+  $("box_file").classList.toggle("hidden", src !== "file");
+  $("box_ws").classList.toggle("hidden", $("editor").value !== "vscode");
 }
 
 function readForm() {
@@ -159,9 +205,13 @@ function readForm() {
     breaks: $("breaks").checked,
     auto_open_editor: $("auto_open_editor").checked,
     keep_focus: $("keep_focus").checked,
-    strip_indent: $("strip_indent").checked,
+    review_moves: $("review_moves").checked,
     languages: [...document.querySelectorAll("#langs input:checked")].map((i) => i.value),
+    projects: [...document.querySelectorAll("#projects input:checked")].map((i) => i.value),
     custom_file: $("custom_file").value.trim(),
+    editor: $("editor").value,
+    source: $("source").value,
+    workspace_dir: $("workspace_dir").value.trim() || "~/dev-projects",
     start_delay: +$("start_delay").value,
   };
 }
@@ -170,8 +220,13 @@ function fillForm(c) {
   const m = document.querySelector(`input[name=mode][value=${c.mode}]`); if (m) m.checked = true;
   $("wpm").value = c.wpm; $("wpmv").textContent = c.wpm;
   $("typo_rate").value = (c.typo_rate * 100).toFixed(1); $("typov").textContent = (c.typo_rate * 100).toFixed(1);
-  for (const k of ["mouse_min", "mouse_max", "minutes", "clear_after_lines", "start_delay", "custom_file"]) $(k).value = c[k];
-  for (const k of ["scroll", "breaks", "auto_open_editor", "keep_focus", "strip_indent"]) $(k).checked = !!c[k];
+  for (const k of ["mouse_min", "mouse_max", "minutes", "clear_after_lines", "start_delay", "custom_file",
+                   "editor", "source", "workspace_dir"]) $(k).value = c[k];
+  for (const k of ["scroll", "breaks", "auto_open_editor", "keep_focus", "review_moves"]) $(k).checked = !!c[k];
+  $("projects").innerHTML = projects.map((p) =>
+    `<label><input type="checkbox" value="${p}" ${c.projects.includes(p) ? "checked" : ""}> ${p}</label>`).join("")
+    || '<span class="muted">No folders in projects/</span>';
+  toggleBoxes();
   $("langs").innerHTML = languages.map((l) =>
     `<label><input type="checkbox" value="${l}" ${c.languages.includes(l) ? "checked" : ""}> ${l}</label>`).join("");
 }
@@ -194,11 +249,18 @@ function render(st) {
   $("s_chars").textContent = s.chars.toLocaleString();
   $("s_lines").textContent = s.lines.toLocaleString();
   $("s_mouse").textContent = s.mouse_moves.toLocaleString();
-  $("s_snippets").textContent = s.snippets;
+  $("s_projects").textContent = s.projects;
   $("s_typos").textContent = s.typos;
-  $("s_lang").textContent = s.language || "–";
+  $("s_files").textContent = s.files;
+  if (s.file) {
+    $("p_where").textContent = `${s.project} / ${s.file}`;
+    $("p_line").textContent = `line ${s.line} of ${s.lines_total}`;
+    $("p_bar").style.width = (s.lines_total ? Math.min(100, 100 * s.line / s.lines_total) : 0) + "%";
+    $("p_files").textContent = `file ${s.file_index} of ${s.files_total} in project`;
+    $("p_verify").textContent = s.verified || s.mismatched ? `${s.verified} files verified clean` +
+      (s.mismatched ? `, ${s.mismatched} differ` : "") : "";
+  }
   $("s_left").textContent = s.ends_at && st.running ? fmt(s.ends_at - Date.now() / 1000) : "∞";
-  $("scratch").textContent = st.scratch_file;
   $("info").textContent = st.editor ? "Editor: " + st.editor : "";
   const log = $("log"); const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 10;
   log.textContent = st.logs.join("\n");
@@ -217,12 +279,14 @@ $("pause").onclick = async () => {
   const resume = $("pause").textContent.includes("Resume");
   render((await api(resume ? "/api/resume" : "/api/pause", {})).status);
 };
-$("openEditor").onclick = () => api("/api/open-editor", {});
+$("openEditor").onclick = () => api("/api/open-editor", readForm());
+$("source").addEventListener("change", toggleBoxes);
+$("editor").addEventListener("change", toggleBoxes);
 document.addEventListener("change", (e) => { if (e.target.closest(".card")) api("/api/settings", readForm()); });
 
 (async () => {
   const s = await api("/api/settings");
-  languages = s.languages; fillForm(s.config);
+  languages = s.languages; projects = s.projects; fillForm(s.config);
   poll(); setInterval(poll, 1000);
 })();
 </script>

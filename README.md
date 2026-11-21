@@ -1,62 +1,69 @@
 # code-bot
 
-Moves the mouse and types code nonstop. Opens Notepad by itself and is controlled from a
-dashboard at **http://localhost:8765**.
+Writes real projects in VS Code nonstop, file by file, with human-like typing and mouse
+movement. You control it from a dashboard at **http://localhost:8765**.
 
 ## First-time setup
 
-1. Install Python 3.9+ from python.org (Windows: tick **"Add Python to PATH"**).
-2. Open this folder in VS Code, open the terminal (`` Ctrl+` ``) and run:
+1. Install **Python 3.9+** (Windows: tick "Add Python to PATH") and **VS Code**.
+2. In this folder, open the VS Code terminal (`` Ctrl+` ``) and run:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-macOS: allow VS Code (or Terminal) under **System Settings → Privacy & Security → Accessibility** and **Input Monitoring**.
-Linux: X11 only; you may need `sudo apt install python3-tk xdotool`.
+- macOS: allow VS Code/Terminal in **System Settings > Privacy & Security > Accessibility** and
+  **Input Monitoring**. In VS Code run **"Shell Command: Install 'code' command in PATH"**.
+- Linux: X11 only; `sudo apt install python3-tk xdotool`.
 
-## Run it
-
-From the VS Code terminal:
+## Run
 
 ```bash
 python app.py
 ```
 
-That will:
-1. open Notepad with its own scratch file (it never types into your real notes),
-2. open the dashboard at http://localhost:8765 in your browser,
-3. wait for you to press **Start**.
+This opens a **new VS Code window** on the workspace folder `~/dev-projects` and the dashboard
+in your browser. Press **Start**.
 
-Other ways:
+**First run only:** VS Code may ask "Do you trust the authors of the files in this folder?".
+Click **Yes, I trust the authors** (tick "trust parent folder") so it never asks again.
+
+Other commands:
 
 | Command | What it does |
 |---|---|
-| `python app.py --autostart` | open Notepad + dashboard and start immediately |
-| `python app.py --port 9000` | use another port |
-| `python app.py --no-browser` | don't open the browser (go to the URL yourself) |
+| `python app.py --autostart` | open everything and start immediately |
 | `python code_bot.py` | terminal only, no dashboard |
-| `python code_bot.py --mode mouse --minutes 60` | mouse only for an hour |
-| `python code_bot.py --file C:\path\main.py --wpm 70` | type your own file |
+| `python code_bot.py --projects task-tracker-api --wpm 70` | one project, faster |
+| `python code_bot.py --editor notepad` | Notepad instead of VS Code |
+| `python code_bot.py --minutes 120 --breaks` | 2 hours, with short random breaks |
 
-In VS Code you can also press **F5** and choose a "code-bot" launch config.
+Or press **F5** in VS Code and pick a "code-bot" launch config.
 
-## Stopping
+## Stop
 
-- **Stop** button in the dashboard, or **F10** / **Esc**
-- **F9** pauses and resumes
-- emergency: shove the mouse into the **top-left corner** of the screen
-- `Ctrl+C` in the terminal shuts down the server
+**Stop** in the dashboard, **F10** or **Esc**. **F9** pauses/resumes.
+Emergency: shove the mouse into any **corner** of the screen. `Ctrl+C` quits the server.
 
-## Features
+## How it works
 
-- Dashboard: Start / Pause / Stop, live stats (uptime, characters, lines, mouse moves, typos), log
-- Opens Notepad by itself (TextEdit on macOS, gedit/mousepad on Linux) and keeps it in front,
-  so typing never lands in the wrong window
-- Human-like typing: speed you set, random rhythm, "thinking" pauses, realistic typos that get corrected
-- Natural mouse: short drifts plus occasional long moves, eased curves, random scrolling
-- Code in Python, JavaScript, TypeScript, SQL, Go and Java, or your own file
-- Clears the scratch file every N lines so it never grows forever
-- Optional random 20–90 s breaks, auto-stop timer
-- Settings remembered in `settings.json`
-- The server only listens on 127.0.0.1 and rejects requests from other websites
+- **Real projects**: `projects/` holds complete projects (Python FastAPI service, React +
+  TypeScript dashboard, Go URL shortener). The bot creates each file in the workspace, opens it
+  as a VS Code tab and types it top to bottom. The explorer tree fills up like a real project,
+  files autosave, then it moves on to the next project, forever.
+- **Clean code**: the workspace gets a `.vscode/settings.json` that turns off auto-closing
+  brackets/quotes, auto-indent, IntelliSense, Copilot and format-on-save, so what gets typed is
+  exactly the source. After each file the bot checks that the saved file matches the source
+  ("files verified clean" in the dashboard).
+- **Human typing**: word-by-word rhythm, slower on symbols and capitals, thinking pauses before
+  functions and classes, typos fixed with backspace, occasional back-up-and-retype, arrowing up to
+  re-read code, Ctrl+S now and then, speed drifting over time.
+- **Human mouse**: curved paths, slow-fast-slow speed, slight tremor, overshoot and
+  correction, small resting drifts, "reading" moves over the code, glances at the file explorer,
+  scrolling. It never clicks.
+- **Your own projects**: drop any folder into `projects/`. Add a `.codebot-order` file listing
+  files in order if you want, otherwise configs/docs go first, then source, then tests.
+  Only plain-ASCII text files are typed.
+- **Safe**: the bot only deletes project folders it created itself (marked with `.codebot`),
+  and won't overwrite a `.vscode/settings.json` it didn't write. The server listens on
+  127.0.0.1 only.

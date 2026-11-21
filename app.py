@@ -2,12 +2,12 @@
 """
 code-bot control panel, served at http://localhost:8765
 
-    python app.py                  # opens Notepad + the dashboard in your browser
+    python app.py                  # opens VS Code (or Notepad) + the dashboard
     python app.py --autostart      # also starts the bot immediately
     python app.py --port 9000 --no-browser --no-editor
 
 Hotkeys (anywhere): F9 = pause/resume, F10 or Esc = stop.
-Emergency stop: shove the mouse into the top-left corner of the screen.
+Emergency stop: shove the mouse into a corner of the screen.
 """
 
 import argparse
@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
     from codebot.engine import Bot, Config
+    from codebot.projects import list_projects
     from codebot.snippets import LANGUAGES
 except ImportError as exc:
     print(f"Missing dependency ({exc}). Run:\n    python -m pip install -r requirements.txt")
@@ -79,7 +80,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, bot.status())
         if self.path == "/api/settings":
             from dataclasses import asdict
-            return self._send(200, {"config": asdict(load_settings()), "languages": LANGUAGES})
+            return self._send(200, {"config": asdict(load_settings()), "languages": LANGUAGES,
+                                    "projects": list_projects()})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -93,7 +95,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/stop": bot.stop,
             "/api/pause": bot.pause,
             "/api/resume": bot.resume,
-            "/api/open-editor": lambda: (bot.editor.open(), "opened"),
+            "/api/open-editor": lambda: (bot.make_editor(Config.from_dict(body or None)
+                                                          if body else load_settings()).open(), "opened"),
             "/api/settings": lambda: (save_settings(body), (True, "saved"))[1],
         }
         fn = routes.get(self.path)
@@ -146,12 +149,12 @@ def main():
     print(f"  code-bot dashboard:  {url}")
     print("  Hotkeys: F9 pause/resume, F10/Esc stop" if hot else
           "  (install pynput for F9/F10 hotkeys)")
-    print("  Emergency stop: mouse to the TOP-LEFT corner")
+    print("  Emergency stop: mouse into a screen corner")
     print("  Quit server: Ctrl+C")
     print("=" * 56, flush=True)
 
     if not args.no_editor:
-        threading.Thread(target=bot.editor.open, daemon=True).start()
+        threading.Thread(target=lambda: bot.make_editor(load_settings()).open(), daemon=True).start()
     if not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     if args.autostart:
