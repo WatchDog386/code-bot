@@ -30,6 +30,12 @@ python install.py
 - **macOS**: a LaunchAgent (at login and every day at 03:00) and a launcher on the desktop.
 - **Linux**: an autostart entry, a desktop launcher and a cron entry at 03:00.
 
+**Pin it to the taskbar** (Windows doesn't let programs pin themselves): open Start, type
+*Invotech 360*, right-click it and choose **Pin to taskbar**. (Or right-click the desktop icon >
+*Show more options* > *Pin to taskbar*.) Clicking it opens the dashboard in its own window with
+the Invotech 360 icon, like an app, not as a browser tab. In Edge you can also use
+*... > Apps > Install this site as an app* on the dashboard, then pin that.
+
 `python install.py --uninstall` removes all of it.
 
 **10 hours a day.** By default it starts at **03:00** and works until **13:00**. The 10 hours are

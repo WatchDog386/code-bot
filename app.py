@@ -131,6 +131,15 @@ class Handler(BaseHTTPRequestHandler):
             st = bot.status()
             st["schedule"] = scheduler.status()
             return self._send(200, st)
+        if self.path == "/manifest.webmanifest":
+            return self._send(200, {
+                "name": "Invotech 360", "short_name": "Invotech 360", "start_url": "/", "display": "standalone",
+                "background_color": "#0E2135", "theme_color": "#0E2135",
+                "icons": [{"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}],
+            }, "application/manifest+json")
+        if self.path == "/icon-512.png":
+            with open(os.path.join(HERE, "assets", "invotech360.png"), "rb") as fh:
+                return self._send(200, fh.read(), "image/png")
         if self.path in ("/favicon.ico", "/favicon.png"):
             with open(FAVICON, "rb") as fh:
                 return self._send(200, fh.read(), "image/png")
@@ -166,6 +175,34 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"ok": bool(ok), "message": msg, "status": st})
 
 
+def open_dashboard(url):
+    """Open the dashboard in its own app window (Edge / Chrome "app" mode: no tabs or
+    address bar, the Invotech 360 icon in the taskbar). Falls back to the normal browser."""
+    import shutil
+    import subprocess
+    candidates = []
+    if sys.platform.startswith("win"):
+        for base in (os.environ.get("ProgramFiles(x86)", ""), os.environ.get("ProgramFiles", ""),
+                     os.environ.get("LOCALAPPDATA", "")):
+            if base:
+                candidates += [os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"),
+                               os.path.join(base, "Google", "Chrome", "Application", "chrome.exe")]
+    elif sys.platform == "darwin":
+        candidates += ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                       "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]
+    else:
+        candidates += [shutil.which(n) or "" for n in ("google-chrome", "chromium", "chromium-browser", "microsoft-edge")]
+    for exe in candidates:
+        if exe and os.path.exists(exe):
+            try:
+                subprocess.Popen([exe, f"--app={url}", "--window-size=1440,900"],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except OSError:
+                pass
+    webbrowser.open(url)
+
+
 def already_running(port):
     """Is our own dashboard answering on this port?"""
     import urllib.request
@@ -194,7 +231,7 @@ def main():
         if already_running(args.port):
             # Invotech 360 is already running (it starts at login): just show the dashboard
             if not args.background:
-                webbrowser.open(url)
+                open_dashboard(url)
             sys.exit(0)
         print(f"Port {args.port} is busy. Is something else using it? "
               f"Try: python app.py --port {args.port + 1}")
@@ -221,7 +258,7 @@ def main():
     if not args.no_editor:
         threading.Thread(target=lambda: bot.open_editor(load_settings()), daemon=True).start()
     if not args.no_browser:
-        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.0, lambda: open_dashboard(url)).start()
     if args.autostart:
         from dataclasses import asdict
         threading.Timer(2.5, lambda: start_by_hand(asdict(load_settings()))).start()

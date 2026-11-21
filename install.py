@@ -67,10 +67,11 @@ def windows(uninstall):
     if uninstall:
         ok = _ps(f"""
 $desk = [Environment]::GetFolderPath('Desktop'); $start = [Environment]::GetFolderPath('Startup')
-Remove-Item -ErrorAction SilentlyContinue (Join-Path $desk '{NAME}.lnk'), (Join-Path $start '{NAME}.lnk')
+$menu = [Environment]::GetFolderPath('Programs')
+Remove-Item -ErrorAction SilentlyContinue (Join-Path $desk '{NAME}.lnk'), (Join-Path $start '{NAME}.lnk'), (Join-Path $menu '{NAME}.lnk')
 Unregister-ScheduledTask -TaskName '{NAME}' -Confirm:$false -ErrorAction SilentlyContinue
 """)
-        print("Removed the desktop icon, the startup entry and the scheduled task." if ok else "Some parts could not be removed.")
+        print("Removed the desktop and Start menu icons, the startup entry and the scheduled task." if ok else "Some parts could not be removed.")
         return
     ok = _ps(f"""
 $shell = New-Object -ComObject WScript.Shell
@@ -84,7 +85,9 @@ function Make($path, $arguments, $desc) {{
   $s.Save()
 }}
 $desk = [Environment]::GetFolderPath('Desktop'); $start = [Environment]::GetFolderPath('Startup')
+$menu = [Environment]::GetFolderPath('Programs')
 Make (Join-Path $desk '{NAME}.lnk') {_q('"' + APP + '"')} 'Open the {NAME} dashboard'
+Make (Join-Path $menu '{NAME}.lnk') {_q('"' + APP + '"')} 'Open the {NAME} dashboard'
 Make (Join-Path $start '{NAME}.lnk') {_q('"' + APP + '" --background')} 'Start {NAME} in the background at sign-in'
 $action = New-ScheduledTaskAction -Execute {_q(pythonw)} -Argument {_q('"' + APP + '" --background')} -WorkingDirectory {_q(HERE)}
 $trigger = New-ScheduledTaskTrigger -Daily -At ([datetime]::Today.AddHours({hh}).AddMinutes({mm}))
@@ -92,7 +95,7 @@ $settings = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable -AllowSt
 Register-ScheduledTask -TaskName '{NAME}' -Action $action -Trigger $trigger -Settings $settings -Description 'Starts {NAME} every day (it runs at most the daily hours set in its dashboard).' -Force | Out-Null
 """)
     if ok:
-        print(f"Done:\n  - '{NAME}' icon on your desktop (opens the dashboard)\n"
+        print(f"Done:\n  - '{NAME}' icon on your desktop and in the Start menu (opens the dashboard)\n"
               f"  - starts by itself in the background when you sign in\n"
               f"  - Task Scheduler task '{NAME}' every day at {hh:02d}:{mm:02d}, waking the PC from sleep")
     else:
@@ -100,6 +103,7 @@ Register-ScheduledTask -TaskName '{NAME}' -Action $action -Trigger $trigger -Set
     if ok:
         subprocess.Popen([pythonw, APP, "--background"], cwd=HERE, creationflags=0x00000008)  # DETACHED
         print(f"{NAME} is now running in the background. Double-click the desktop icon to open the dashboard.")
+        print(f"To pin it to the taskbar: open Start, type '{NAME}', right-click it > Pin to taskbar.")
 
 
 # ------------------------------------------------------------------------------ macOS
