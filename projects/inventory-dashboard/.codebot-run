@@ -1,0 +1,3 @@
+# typed into the VS Code terminal (or run in the background) after the project is written
+npm install --no-audit --no-fund
+npx tsc --noEmit

@@ -254,6 +254,11 @@
   .tk-kw { color: var(--tk-kw); } .tk-str { color: var(--tk-str); } .tk-com { color: var(--tk-com); font-style: italic; }
   .tk-num { color: var(--tk-num); } .tk-fn { color: var(--tk-fn); } .tk-type { color: var(--tk-type); } .tk-dec { color: var(--tk-dec); }
   .tk-punc { color: var(--tk-punc); }
+  .preview { flex: 1; min-height: 0; overflow: auto; background: #0B0D11; display: flex; flex-direction: column; }
+  .preview img { width: 100%; height: auto; display: block; }
+  .preview .pv-bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-size: 12.5px; color: #A3ADA8; background: #111317; flex: none; }
+  .preview .pv-bar .dot { background: var(--red); }
+  .preview .pv-msg { padding: 40px 20px; text-align: center; color: #A3ADA8; font-size: 13.5px; }
   .welcome { flex: 1; display: grid; place-items: center; padding: 30px; overflow: auto; }
   .welcome > div { max-width: 440px; width: 100%; text-align: center; }
   .welcome .logo { width: 54px; height: 54px; border-radius: 12px; margin: 0 auto 16px; }
@@ -275,6 +280,7 @@
   .term-body .ok { color: var(--green); }
   .term-body .warn { color: #C98A00; }
   .term-body .info { color: var(--blue); }
+  .term-body .cmd { color: var(--ink); font-weight: 500; }
 
   /* agent panel (Cascade / Composer style) */
   .agent { grid-column: 3; grid-row: 1 / 3; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
@@ -299,6 +305,8 @@
   .step.k-plan .si, .step.k-you .si { background: var(--blue-soft); color: var(--blue); }
   .step.k-warn .si, .step.k-break .si, .step.k-pause .si { background: var(--amber-soft); color: #B07F00; }
   .step.k-stop .si { background: var(--red-soft); color: var(--red); }
+  .step.k-term .si { background: var(--nav); color: #fff; }
+  .step.k-term .st1 b { font-family: var(--mono); font-size: 12.5px; }
   .msg { align-self: flex-end; max-width: 88%; background: var(--mini); border-radius: 10px 10px 2px 10px; padding: 8px 12px; margin: 8px 0 4px; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .reply { display: flex; gap: 10px; padding: 6px 4px 10px; font-size: 13.5px; }
   .reply .si { width: 24px; height: 24px; border-radius: 6px; background: var(--nav); display: grid; place-items: center; flex: none; }
@@ -439,12 +447,18 @@
             <div class="etabs" id="etabs"></div>
             <div class="tabtools">
               <button class="icon-btn" id="showExplorer" title="Show explorer (Ctrl+B)" data-i="sidebar"></button>
+              <button class="icon-btn" id="previewBtn" title="Live preview of the bot's VS Code screen" data-i="monitor"></button>
               <button class="icon-btn on" id="followBtn" title="Follow the agent's cursor" data-i="eye"></button>
               <button class="icon-btn" id="openEditor" title="Open the real editor (VS Code)" data-i="external"></button>
             </div>
           </div>
           <div class="crumbs" id="crumbs"></div>
           <div class="code" id="code"></div>
+          <div class="preview hidden" id="preview">
+            <div class="pv-bar"><i class="dot"></i><b style="color:#fff">LIVE</b><span id="pvInfo">The bot's screen, updated every second</span></div>
+            <img id="pvImg" alt="Live view of the bot's VS Code screen">
+            <div class="pv-msg hidden" id="pvMsg">Screen capture isn't available. On macOS allow Screen Recording for your terminal / Python in System Settings &gt; Privacy &amp; Security.</div>
+          </div>
           <div class="welcome" id="welcome">
             <div>
               <div class="logo" data-i="zap"></div>
@@ -465,7 +479,8 @@
 
         <div class="term" id="term">
           <div class="term-tabs">
-            <button class="t on" data-term="output">Output</button>
+            <button class="t on" data-term="terminal">Terminal</button>
+            <button class="t" data-term="output">Output</button>
             <button class="t" data-term="problems">Problems <span class="count" id="probCount">0</span></button>
             <button class="t" data-term="stats">Session</button>
             <div class="spacer"></div>
@@ -610,7 +625,8 @@
             </div>
             <div class="checks">
               <label><input type="checkbox" id="scroll"> Random scrolling</label>
-              <label><input type="checkbox" id="detect_user"> Pause when I use the mouse</label>
+              <label><input type="checkbox" id="detect_user"> Let go of the mouse when I use it</label>
+              <label><input type="checkbox" id="background_typing"> Keep writing code while I work (VS Code)</label>
               <label><input type="checkbox" id="keep_focus"> Keep editor focused</label>
               <label><input type="checkbox" id="auto_open_editor"> Auto-open editor</label>
             </div>
@@ -658,6 +674,8 @@
           <div>
             <label class="f" style="margin-top:0">Workspace folder (projects get created here)</label>
             <input type="text" id="workspace_dir" placeholder="~/dev-projects">
+            <div class="checks" style="grid-template-columns:1fr"><label><input type="checkbox" id="run_terminal"> Run the project's commands (build / tests) when it's finished</label></div>
+            <label class="f">Stop a background command after (s)</label><input type="number" id="terminal_timeout" min="10" step="30">
             <div class="checks" style="grid-template-columns:1fr"><label><input type="checkbox" id="keep_finished"> Keep finished projects (off = only the current project)</label></div>
           </div>
         </div>
@@ -913,6 +931,9 @@ function readForm() {
     review_moves: $("review_moves").checked,
     detect_user: $("detect_user").checked,
     keep_finished: $("keep_finished").checked,
+    background_typing: $("background_typing").checked,
+    run_terminal: $("run_terminal").checked,
+    terminal_timeout: +$("terminal_timeout").value,
     maximize: $("maximize").checked,
     resume_after: +$("resume_after").value,
     think: +$("think").value,
@@ -937,7 +958,8 @@ function fillForm(c) {
   for (const k of ["mouse_min", "mouse_max", "minutes", "clear_after_lines", "start_delay", "custom_file",
                    "editor", "source", "workspace_dir"]) $(k).value = c[k];
   for (const k of ["scroll", "breaks", "auto_open_editor", "keep_focus", "review_moves", "detect_user",
-                   "keep_finished", "maximize"]) $(k).checked = !!c[k];
+                   "keep_finished", "maximize", "background_typing", "run_terminal"]) $(k).checked = !!c[k];
+  $("terminal_timeout").value = c.terminal_timeout;
   $("resume_after").value = c.resume_after;
   $("think").value = c.think; $("thinkv").textContent = (+c.think).toFixed(1);
   $("monitor").innerHTML = '<option value="-1">Auto (a side screen)</option>' +
@@ -1092,7 +1114,9 @@ function ensureLiveTab() {
   }
 }
 function renderTabs() {
-  $("etabs").innerHTML = tabs.map((t) => `<button class="etab${t.id === activeTab ? " on" : ""}" data-tab="${esc(t.id)}" title="${esc(t.project + "/" + t.path)}">
+  $("etabs").innerHTML = tabs.map((t) => t.id === "preview"
+    ? `<button class="etab${t.id === activeTab ? " on" : ""}" data-tab="preview" title="Live view of the bot's screen">${ic("monitor")}<span>Preview</span><span class="x" data-close="preview">${ic("x")}</span></button>`
+    : `<button class="etab${t.id === activeTab ? " on" : ""}" data-tab="${esc(t.id)}" title="${esc(t.project + "/" + t.path)}">
       ${fileIcon(t.path)}<span>${esc(t.path.split("/").pop())}</span>
       ${t.id === "live" ? '<i class="live" title="Agent is writing this file"></i>' : `<span class="x" data-close="${esc(t.id)}">${ic("x")}</span>`}</button>`).join("");
 }
@@ -1102,13 +1126,35 @@ $("etabs").onclick = (e) => {
   const t = e.target.closest("[data-tab]");
   if (t) { activeTab = t.dataset.tab; if (activeTab === "live") { follow = true; $("followBtn").classList.add("on"); } renderTabs(); renderEditor(true); renderTree(); }
 };
+function openPreview() {
+  if (!tabs.find((t) => t.id === "preview")) tabs.push({ id: "preview", project: "", path: "Preview" });
+  activeTab = "preview"; follow = false; $("followBtn").classList.remove("on");
+  renderTabs(); renderEditor(true); refreshPreview();
+}
+$("previewBtn").onclick = () => activeTab === "preview" ? $("etabs").querySelector('[data-close="preview"]').click() : openPreview();
+let pvBusy = false;
+function refreshPreview() {
+  if (activeTab !== "preview" || page !== "agent" || pvBusy || document.hidden) return;
+  pvBusy = true;
+  const img = new Image();
+  img.onload = () => { $("pvImg").src = img.src; $("pvImg").classList.remove("hidden"); $("pvMsg").classList.add("hidden");
+    $("pvInfo").textContent = "The bot's screen · " + new Date().toLocaleTimeString(); pvBusy = false; };
+  img.onerror = () => { $("pvImg").classList.add("hidden"); $("pvMsg").classList.remove("hidden"); pvBusy = false; };
+  img.src = "/api/screen.jpg?t=" + Date.now();
+}
+setInterval(refreshPreview, 1000);
 $("followBtn").onclick = () => {
   follow = !follow; $("followBtn").classList.toggle("on", follow);
   if (follow && tabs.find((t) => t.id === "live")) { activeTab = "live"; renderTabs(); renderEditor(true); renderTree(); }
 };
 let lastRender = "";
 function renderEditor(force) {
-  const t = tabs.find((x) => x.id === activeTab);
+  const t0 = tabs.find((x) => x.id === activeTab);
+  const isPreview = t0?.id === "preview";
+  $("preview").classList.toggle("hidden", !isPreview);
+  $("previewBtn").classList.toggle("on", isPreview);
+  const t = isPreview ? null : t0;
+  if (isPreview) { $("welcome").classList.add("hidden"); $("code").classList.add("hidden"); $("crumbs").classList.add("hidden"); lastRender = ""; return; }
   $("welcome").classList.toggle("hidden", !!t);
   $("code").classList.toggle("hidden", !t);
   $("crumbs").classList.toggle("hidden", !t);
@@ -1137,7 +1183,7 @@ $("code").addEventListener("wheel", (e) => { if (e.deltaY < 0 && follow && activ
 /* ================================================================ agent timeline */
 let events = [], maxEventId = 0, seenEvents = store.get("seen", 0), chat = [];
 const KIND_ICON = { plan: "layers", create: "file", verify: "check", warn: "alert", think: "cpu", start: "play", stop: "stop",
-                    pause: "pause", resume: "play", you: "user", break: "coffee", done: "sparkle" };
+                    pause: "pause", resume: "play", you: "user", break: "coffee", done: "sparkle", term: "terminal" };
 function stepHtml(e) {
   return `<div class="step k-${e.kind}"><div class="si">${ic(KIND_ICON[e.kind] || "zap")}</div><div class="sb">
     <div class="st1"><b>${esc(e.title)}</b><time>${ago(e.t)}</time></div>${e.detail ? `<div class="sd">${esc(e.detail)}</div>` : ""}</div></div>`;
@@ -1146,7 +1192,9 @@ function nowLine() {
   const st = lastStatus; if (!st || !st.running) return "";
   const s = st.stats; let txt = "", spin = true;
   if (st.state === "starting") txt = "Starting up…";
+  else if (st.state === "you" && live.background) txt = `You're working · still writing ${live.file || "code"} in the background` + (live.file ? ` (line ${live.line}/${live.lines_total})` : "") + (s.resume_in ? ` · takes the keyboard back after ${s.resume_in}s idle` : "");
   else if (st.state === "you") { txt = s.resume_in ? `You have control · continues after ${s.resume_in}s idle` : "You have control · press Resume"; spin = false; }
+  else if (live.activity === "terminal") txt = "Running the project's commands…";
   else if (st.state === "paused") { txt = "Paused"; spin = false; }
   else if (st.state === "break") txt = "On a short break…";
   else if (live.activity === "thinking") txt = `Thinking about ${live.file ? live.file.split("/").pop() : "the next step"}…`;
@@ -1191,7 +1239,8 @@ const HELP = `Here's what I understand:
 <code>60 wpm</code> — typing speed · <code>think 1.5</code> — longer pauses · <code>typos 3%</code>
 <code>typing only</code> · <code>mouse only</code> · <code>mouse and typing</code>
 <code>snippets python go</code> — short snippets instead of projects
-<code>all projects</code> · <code>open editor</code> · <code>status</code>`;
+<code>all projects</code> · <code>open editor</code> · <code>preview</code> · <code>status</code>
+While you use your mouse/keyboard I let go of them, and the code keeps being written into the file in the background.`;
 async function runCommand(raw) {
   const text = raw.trim(); if (!text) return;
   say(text); renderSteps();
@@ -1205,6 +1254,8 @@ async function runCommand(raw) {
   if (/\b(stop|halt|kill|cancel)\b/.test(t)) { await doStop(); return reply("Stopped. Your workspace is left as it is."); }
   if (/^(pause|hold on|wait)\b/.test(t)) { await api("/api/pause", {}); poll(); return reply("Paused. Say <code>resume</code> to carry on."); }
   if (/^(resume|continue|go on|carry on|unpause)\b/.test(t)) { await api("/api/resume", {}); poll(); return reply("Back to work."); }
+  if (/^(preview|show (me )?(the )?(preview|screen)|watch( it)?)\b/.test(t)) { openPreview(); return reply("Here's a live view of the bot's screen. It refreshes every second."); }
+  if (/^(run|show) (the )?terminal/.test(t)) { termTab = "terminal"; document.querySelector('[data-term="terminal"]').click(); return reply("The Terminal tab shows the commands I run when a project is finished."); }
   if (/open (the )?(editor|vs ?code)/.test(t)) { api("/api/open-editor", readForm()); return reply("Opening the editor on the bot's screen…"); }
   let m;
   if ((m = t.match(/(\d{2,3})\s*wpm|wpm\s*(\d{2,3})|speed\s*(\d{2,3})/))) {
@@ -1274,7 +1325,7 @@ const openEd = () => { api("/api/open-editor", readForm()); toast("Opening the e
 $("openEditor").onclick = openEd; $("openEditor2").onclick = openEd;
 
 /* terminal panel */
-let termTab = "output";
+let termTab = "terminal";
 document.querySelectorAll("[data-term]").forEach((b) => b.onclick = () => {
   termTab = b.dataset.term; document.querySelectorAll("[data-term]").forEach((x) => x.classList.toggle("on", x === b));
   $("term").classList.remove("min"); renderTerm();
@@ -1284,7 +1335,12 @@ $("termToggle").onclick = toggleTerm;
 function renderTerm() {
   const st = lastStatus; if (!st) return;
   const body = $("termBody"); const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 10;
-  if (termTab === "output") {
+  if (termTab === "terminal") {
+    const lines = live.terminal || [];
+    body.innerHTML = lines.map((l) => l.startsWith("$ ") ? `<span class="cmd">${esc(l)}</span>`
+      : /^\[exit 0/.test(l) ? `<span class="ok">${esc(l)}</span>` : /^\[exit|^\(stopped/.test(l) ? `<span class="warn">${esc(l)}</span>` : esc(l)).join("\n")
+      || '<span class="ts">No commands yet. When a project is finished, its build/test commands run here (or in VS Code\'s own terminal when the bot has the keyboard).</span>';
+  } else if (termTab === "output") {
     body.innerHTML = st.logs.map((l) => {
       const m = l.match(/^(\d\d:\d\d:\d\d) (.*)$/); const msg = m ? m[2] : l;
       const cls = /differs|can't|could not|error|failed/i.test(msg) ? "warn" : /^Writing|^Running|^Using/.test(msg) ? "info" : /Finished|Resumed|Back from/.test(msg) ? "ok" : "";
@@ -1298,7 +1354,7 @@ function renderTerm() {
     const s = st.stats;
     const rows = [["state", st.state], ["editor", st.editor || "—"], ["screen", st.monitor || "—"], ["uptime", fmt(s.uptime)],
       ["characters", s.chars.toLocaleString()], ["lines", s.lines.toLocaleString()], ["files", `${s.files} (${s.verified} verified, ${s.mismatched} differ)`],
-      ["projects", s.projects], ["typos fixed", s.typos], ["mouse moves", s.mouse_moves], ["scrolls", s.scrolls], ["breaks", s.breaks], ["takeovers", s.takeovers]];
+      ["projects", s.projects], ["commands run", s.commands || 0], ["typos fixed", s.typos], ["mouse moves", s.mouse_moves], ["scrolls", s.scrolls], ["breaks", s.breaks], ["takeovers", s.takeovers]];
     body.innerHTML = rows.map(([k, v]) => `<span class="ts">${k.padEnd(13)}</span>${esc(v)}`).join("\n");
   }
   if (atBottom) body.scrollTop = body.scrollHeight;
@@ -1309,7 +1365,8 @@ const STATE_LABEL = { you: "You have control", running: "Running", paused: "Paus
 function render(st) {
   if (!st) return;
   lastStatus = st;
-  const state = st.state, s = st.stats, label = STATE_LABEL[state] || state;
+  const state = st.state, s = st.stats;
+  const label = state === "you" && live.background ? "You're working · bot writes in background" : (STATE_LABEL[state] || state);
   for (const el of [$("state"), $("runPill")]) { el.textContent = state === "you" ? "you" : state; el.className = "pill " + state; }
   $("railDot").className = "dot " + state; $("runDot").className = "dot " + state;
   $("railState").textContent = label; $("sbStateText").textContent = label;
@@ -1352,7 +1409,7 @@ function render(st) {
   const probs = s.mismatched; $("sbProbText").textContent = probs; $("probCount").textContent = probs;
 
   const rows = [["Editor", st.editor || "—"], ["Screen", st.monitor || "—"], ["Projects written", s.projects], ["Mouse moves", s.mouse_moves.toLocaleString()],
-                ["Scrolls", s.scrolls], ["Breaks taken", s.breaks], ["Times you took over", s.takeovers]];
+                ["Commands run", s.commands || 0], ["Scrolls", s.scrolls], ["Breaks taken", s.breaks], ["Times you took over", s.takeovers]];
   $("sessionRows").innerHTML = rows.map(([k, v]) => `<div class="prow"><span>${k}</span><b>${esc(v)}</b></div>`).join("");
 
   const log = $("log"); const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 10;
@@ -1392,6 +1449,7 @@ function commands() {
     { icon: "external", label: "Open the real editor (VS Code)", fn: openEd },
     { icon: "msg", label: "Ask the agent…", hint: "Ctrl+L", fn: () => { go("agent"); $("ask").focus(); } },
     ...Object.entries(TITLES).map(([id, t]) => ({ icon: "chevR", label: "Go to " + t, fn: () => go(id) })),
+    { icon: "monitor", label: "Show live preview of VS Code", fn: () => { go("agent"); openPreview(); } },
     { icon: "moon", label: "Toggle dark mode", fn: toggleDark },
     { icon: "terminal", label: "Toggle bottom panel", hint: "Ctrl+J", fn: toggleTerm },
     { icon: "sidebar", label: "Toggle explorer", hint: "Ctrl+B", fn: () => setExplorer($("ide").classList.contains("no-explorer")) },

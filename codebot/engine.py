@@ -9,6 +9,8 @@
 import math
 import os
 import random
+import shutil
+import subprocess
 import re
 import sys
 import threading
@@ -22,7 +24,7 @@ import pyautogui
 from . import human
 from .editor import FocusedWindowEditor, NotepadEditor, VSCodeEditor, doc_end_keys
 from .monitors import get_monitors, pick_monitor
-from .projects import list_projects, project_cycle
+from .projects import list_projects, localize_command, project_commands, project_cycle
 from .snippets import LANGUAGES, pick_pool
 
 pyautogui.FAILSAFE = True  # mouse into a corner of the main screen = emergency stop
@@ -64,7 +66,10 @@ class Config:
     scroll: bool = True
     review_moves: bool = True          # sometimes arrow up to "re-read" code, then back
     breaks: bool = False
-    detect_user: bool = True           # pause when you use the mouse/keyboard
+    detect_user: bool = True           # step aside when you use the mouse/keyboard
+    background_typing: bool = True     # VS Code: while you're busy, keep writing the file on disk
+    run_terminal: bool = True          # run the project's commands (build/tests) when it's done
+    terminal_timeout: float = 300      # seconds before a background command is stopped
     resume_after: float = 20.0         # resume after this many idle seconds (0 = stay paused)
     clear_after_lines: int = 150       # Notepad only: wipe scratch every N lines
     auto_open_editor: bool = True
@@ -86,6 +91,7 @@ class Config:
         c.minutes = max(0.0, float(c.minutes))
         c.start_delay = max(0.0, float(c.start_delay))
         c.resume_after = max(0.0, float(c.resume_after))
+        c.terminal_timeout = max(10.0, float(c.terminal_timeout))
         c.monitor = int(c.monitor)
         if c.mode not in ("both", "mouse", "type"):
             c.mode = "both"
@@ -122,6 +128,13 @@ class Bot:
         self._event_id = 0
         self.activity = ""
         self.live = {"project": "", "files": [], "done": [], "file": "", "text": ""}
+        self.terminal = deque(maxlen=400)   # output of commands the bot ran
+        # set = the bot may use the keyboard/mouse; cleared while YOU are using them
+        self._hands = threading.Event()
+        self._hands.set()
+        self._bg_ready = False      # first disk write after a takeover waits for VS Code's autosave
+        self._cur_path = None       # file being written (VS Code)
+        self._proc = None           # running background command
         self._reset_stats()
 
     # ------------------------------------------------------------ utilities
@@ -141,19 +154,35 @@ class Bot:
         return {"project": lv["project"], "files": lv["files"], "done": lv["done"],
                 "file": lv["file"], "text": lv["text"], "activity": self.activity,
                 "line": self.stats["line"], "lines_total": self.stats["lines_total"],
+                "hands": self._hands.is_set(), "background": self._background(),
+                "terminal": list(self.terminal)[-200:],
                 "events": [e for e in self.events if e["id"] > since]}
 
     def _reset_stats(self):
         self.stats = {"chars": 0, "lines": 0, "files": 0, "projects": 0, "mouse_moves": 0,
                       "typos": 0, "scrolls": 0, "breaks": 0, "takeovers": 0,
-                      "verified": 0, "mismatched": 0,
+                      "verified": 0, "mismatched": 0, "commands": 0,
                       "project": "", "file": "", "line": 0, "lines_total": 0,
                       "file_index": 0, "files_total": 0, "started_at": None, "ends_at": None,
                       "resume_in": 0}
 
     def _halt(self):
         """Stop requested, or paused (for any reason) - used to abort mouse moves instantly."""
-        return self._stop.is_set() or not self._run.is_set()
+        return self._stop.is_set() or not self._run.is_set() or not self._hands.is_set()
+
+    def _background(self):
+        """True while you have the keyboard/mouse but the bot keeps writing on disk."""
+        return self.running and self.state == "you" and not self._hands.is_set()
+
+    def _can_background(self):
+        return (self.cfg.background_typing and self.cfg.mode != "mouse" and self.editor is not None
+                and self.editor.kind == "vscode")
+
+    def _gate_hands(self):
+        """Wait until the bot may use the mouse/keyboard (or stop)."""
+        while self._gate() and not self._hands.is_set():
+            self._stop.wait(0.25)
+        return not self._stop.is_set()
 
     @contextmanager
     def _act(self):
@@ -232,6 +261,9 @@ class Bot:
         self._user_paused = False
         self._reset_stats()
         self.live = {"project": "", "files": [], "done": [], "file": "", "text": ""}
+        self.terminal.clear()
+        self._hands.set()
+        self._bg_ready = False
         self.state = "starting"
         t = threading.Thread(target=self._main, daemon=True, name="codebot-main")
         self._threads = [t]
@@ -243,6 +275,13 @@ class Bot:
             self.log("Stopping...")
         self._stop.set()
         self._run.set()
+        self._hands.set()
+        proc = self._proc
+        if proc and proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
         self.state = "stopped"
         return True, "stopped"
 
@@ -256,10 +295,17 @@ class Bot:
         return True, self.state
 
     def resume(self):
+        if self.running and self._run.is_set() and not self._hands.is_set():
+            self._take_back()
+            self.state = "running"
+            self.log("Resumed - bot has the keyboard and mouse again")
+            self.event("resume", "Took the keyboard back", "")
+            return True, self.state
         if self.running and not self._run.is_set():
             self._user_paused = False
             self._need_refocus = True
             self._run.set()
+            self._take_back()
             self.state = "running"
             self.log("Resumed")
             self.event("resume", "Resumed", "")
@@ -352,27 +398,45 @@ class Bot:
         if not (self.running and self.cfg.detect_user):
             return
         if self.state == "running":
-            self._run.clear()
             self._need_refocus = True
-            self.state = "you"
             self.stats["takeovers"] += 1
-            after = (f"resumes after {self.cfg.resume_after:.0f}s idle" if self.cfg.resume_after
-                     else "press Resume / F9 to continue")
-            self.log(f"You took over the {what} - bot paused ({after})")
-            self.event("you", f"You took over the {what}", after)
+            after = (f"takes them back after {self.cfg.resume_after:.0f}s idle" if self.cfg.resume_after
+                     else "press Resume / F9 to give them back")
+            if self._can_background():
+                # let go of the mouse and keyboard, keep writing the file on disk
+                self._hands.clear()
+                self._bg_ready = False
+                self.state = "you"
+                self.log(f"You took over the {what} - bot let go of mouse/keyboard, "
+                         f"keeps writing in the background ({after})")
+                self.event("you", f"You took over the {what}", "code keeps being written in the background · " + after)
+            else:
+                self._run.clear()
+                self.state = "you"
+                self.log(f"You took over the {what} - bot paused ({after})")
+                self.event("you", f"You took over the {what}", after)
+
+    def _take_back(self):
+        if not self._hands.is_set():
+            self._need_refocus = True
+            self._hands.set()
 
     def _check_auto_resume(self):
         if (self.state == "you" and self.cfg.resume_after and not self._user_paused
                 and time.time() - self._last_user >= self.cfg.resume_after):
             self._need_refocus = True
+            self._take_back()
             self.state = "running"
             self._run.set()
             self.log("You've been idle - bot continues")
+            self.event("resume", "You're idle - back to typing in VS Code", "")
 
     def _refocus_if_needed(self):
         """After a pause, bring the editor back and put the caret back at the end."""
         if self._need_refocus and self.editor and self.editor.kind != "focused":
             self._need_refocus = False
+            if self._cur_path and hasattr(self.editor, "show_file"):
+                self.editor.show_file(self._cur_path)   # its tab, freshly reloaded from disk
             self.editor.focus(force=True)
             time.sleep(0.25)
             pyautogui.hotkey(*doc_end_keys())
@@ -441,7 +505,7 @@ class Bot:
 
     # ---------------------------------------------------------------- mouse
     def _mouse_loop(self):
-        while self._gate():
+        while self._gate_hands():
             r = random.random()
             with self._act():  # all pyautogui calls stay under the lock (X11 isn't thread-safe)
                 if self._halt():
@@ -515,16 +579,20 @@ class Bot:
             d += random.uniform(0.2, 0.8) * self.cfg.think  # micro-hesitation
         return d
 
-    def _type_text(self, text, base):
+    def _type_text(self, text, base, mirror=True):
+        """Type with real keystrokes. Returns how many characters were typed (fewer if you
+        took the keyboard mid-way), or None if the bot was stopped."""
         cfg = self.cfg
         i = 0
         while i < len(text):
             if self._stop.is_set():
-                return False
+                return None
             if not self._run.is_set():
                 if not self._gate():
-                    return False
-                self._refocus_if_needed()  # you may have clicked elsewhere meanwhile
+                    return None
+            if not self._hands.is_set():
+                return i
+            self._refocus_if_needed()  # you may have clicked elsewhere meanwhile
             ch = text[i]
             if cfg.typo_rate and i > 0 and ch.lower() in NEIGHBORS and random.random() < cfg.typo_rate:
                 wrong = random.choice(NEIGHBORS[ch.lower()])
@@ -534,8 +602,9 @@ class Bot:
                 time.sleep(base * random.uniform(1, 2.5))
                 self.stats["typos"] += 1
             pyautogui.write(ch)
-            self.live["text"] += ch
-            self.stats["chars"] += 1
+            if mirror:
+                self.live["text"] += ch
+                self.stats["chars"] += 1
             time.sleep(self._char_delay(ch, base))
             # hesitation: back up over the last few characters and retype them
             if ch == " " and i > 4 and random.random() < cfg.typo_rate * 0.6:
@@ -548,6 +617,37 @@ class Bot:
                     pyautogui.write(c)
                     time.sleep(self._char_delay(c, base))
             i += 1
+        return i
+
+    # ------------------------------------------------- background (on disk)
+    def _flush_disk(self):
+        if not self._cur_path:
+            return
+        try:
+            with open(self._cur_path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(self.live["text"])
+        except OSError as exc:
+            self.log(f"Can't write {self._cur_path}: {exc}")
+
+    def _bg_write(self, text, base):
+        """You have the keyboard/mouse: keep writing word by word straight into the file.
+        VS Code reloads the open file as it changes, so the code keeps growing on screen."""
+        if not self._bg_ready:
+            # give VS Code's autosave (1.5s) time to save what was typed with keystrokes,
+            # so the editor tab isn't "dirty" when the file changes underneath it
+            if not self._wait(2.5):
+                return False
+            self._bg_ready = True
+        self.activity = "background"
+        for chunk in re.findall(r"\s+|\S+", text):
+            if not self._gate():
+                return False
+            delay = sum(self._char_delay(c, base) for c in chunk)
+            if not self._wait(delay):
+                return False
+            self.live["text"] += chunk
+            self.stats["chars"] += len(chunk)
+            self._flush_disk()
         return True
 
     def _line_pause(self, line):
@@ -602,23 +702,58 @@ class Bot:
             base = 60.0 / (cfg.wpm * 5) / self._energy * random.lognormvariate(0, 0.12)
             stripped = line.lstrip(" ")
             indent = len(line) - len(stripped)
-            with self._act():
-                if not self._gate():
+            nl = "\n" if (idx < len(lines) - 1 or ends_with_newline) else ""
+            full = " " * indent + stripped + nl
+            pos = 0          # how much of `full` is written so far
+            if self._hands.is_set():
+                with self._act():
+                    if not self._gate():
+                        return False
+                    if self._hands.is_set():
+                        self._refocus_if_needed()
+                        if cfg.keep_focus and self.editor.kind != "focused":
+                            self.editor.focus()
+                            pyautogui.hotkey(*doc_end_keys())  # caret back to end, whatever happened
+                        self.activity = "typing"
+                        while pos < indent and self._hands.is_set():
+                            pyautogui.press("space")
+                            self.live["text"] += " "
+                            pos += 1
+                            time.sleep(base * random.uniform(0.15, 0.35))
+                        if pos == indent:
+                            n = self._type_text(stripped, base)
+                            if n is None:
+                                return False
+                            pos += n
+                            if n == len(stripped) and nl and self._hands.is_set():
+                                pyautogui.press("enter")
+                                self.live["text"] += "\n"
+                                pos += 1
+            while pos < len(full):
+                if self._stop.is_set():
                     return False
-                self._refocus_if_needed()
-                if cfg.keep_focus and self.editor.kind != "focused":
-                    self.editor.focus()
-                    pyautogui.hotkey(*doc_end_keys())  # caret back to end, whatever happened
-                for _ in range(indent):
-                    pyautogui.press("space")
-                    time.sleep(base * random.uniform(0.15, 0.35))
-                self.live["text"] += " " * indent
-                self.activity = "typing"
-                if not self._type_text(stripped, base):
+                if self._can_background() and self._cur_path and not self._hands.is_set():
+                    if not self._bg_write(full[pos:], base):
+                        return False
+                    pos = len(full)
+                    break
+                # can't write in the background: wait for the keyboard, then type the rest
+                if not self._gate_hands():
                     return False
-                if idx < len(lines) - 1 or ends_with_newline:
-                    pyautogui.press("enter")
-                    self.live["text"] += "\n"
+                with self._act():
+                    if not self._hands.is_set():
+                        continue
+                    self._refocus_if_needed()
+                    rest = full[pos:]
+                    body = rest.rstrip("\n")
+                    n = self._type_text(body, base)
+                    if n is None:
+                        return False
+                    pos += n
+                    if n == len(body) and rest.endswith("\n") and self._hands.is_set():
+                        pyautogui.press("enter")
+                        self.live["text"] += "\n"
+                        pos += 1
             self.stats["lines"] += 1
             self.stats["line"] = idx + 1
             lines_since_clear += 1
@@ -628,6 +763,8 @@ class Bot:
                     self.editor.clear()
                 self.live["text"] = ""
                 lines_since_clear = 0
+            if not self._hands.is_set():
+                continue
             if cfg.review_moves and self.editor.kind != "focused" and stripped and random.random() < 0.03:
                 with self._act():
                     if not self._halt():
@@ -643,9 +780,10 @@ class Bot:
             if not self._gate():
                 return
             with self._act():
-                if self.cfg.maximize and self.monitor:
+                hands = self._hands.is_set()
+                if self.cfg.maximize and self.monitor and hands:
                     self.editor.place(self.monitor.work)
-                self.editor.begin_project(project)
+                self.editor.begin_project(project, interactive=hands)
             self.stats.update(project=project, files_total=len(files), file_index=0)
             self.stats["projects"] += 1
             self.live.update(project=project, files=[r for r, _ in files], done=[], file="", text="")
@@ -659,12 +797,22 @@ class Bot:
                 self.event("create", f"Created {rel}", f"{content.count(chr(10)) + 1} lines")
                 self.log(f"Writing {project}/{rel}")
                 with self._act():
-                    path = self.editor.begin_file(rel)
-                    self._need_refocus = False
+                    hands = self._hands.is_set()
+                    # while you're busy: just create the file (VS Code's explorer shows it);
+                    # its tab opens when the bot gets the keyboard back
+                    path = self.editor.begin_file(rel, show=hands)
+                    self._cur_path = path
+                    if hands:
+                        self._bg_ready = False
+                    self._need_refocus = not hands
                 if not self._type_document(content):
                     return
                 with self._act():
-                    ok = self.editor.end_file(path, content)
+                    if self._hands.is_set():
+                        ok = self.editor.end_file(path, content)
+                    else:
+                        self._flush_disk()
+                        ok = self.editor.verify(path, content) if hasattr(self.editor, "verify") else None
                 self.stats["files"] += 1
                 self.live["done"].append(rel)
                 if ok is True:
@@ -679,8 +827,137 @@ class Bot:
                     return
             self.log(f"Finished project {project}")
             self.event("done", f"Finished {project}", f"{len(files)} files written")
+            if self.cfg.run_terminal and not self._run_commands(project):
+                return
             if not self._wait(random.uniform(25, 60) * self.cfg.think):
                 return
+
+    # -------------------------------------------------------------- preview
+    _shot = (0.0, None)
+
+    def screenshot_jpeg(self, max_width=1280, quality=70):
+        """A JPEG of the bot's screen (VS Code), for the dashboard's live preview."""
+        now = time.time()
+        if now - self._shot[0] < 0.6 and self._shot[1]:
+            return self._shot[1]
+        mon = self.monitor or pick_monitor(self.cfg.monitor)
+        x, y, w, h = mon.rect
+        img = None
+        try:
+            from PIL import ImageGrab
+            kw = {"all_screens": True} if sys.platform.startswith("win") else {}
+            img = ImageGrab.grab(bbox=(x, y, x + w, y + h), **kw)
+        except Exception:  # noqa: BLE001
+            try:
+                img = pyautogui.screenshot(region=(x, y, w, h))
+            except Exception:  # noqa: BLE001
+                return None
+        import io
+        img = img.convert("RGB")
+        if img.width > max_width:
+            img = img.resize((max_width, round(img.height * max_width / img.width)))
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=quality)
+        data = buf.getvalue()
+        self._shot = (now, data)
+        return data
+
+    # ------------------------------------------------------------- terminal
+    def _term(self, line):
+        self.terminal.append(line)
+
+    def _run_commands(self, project):
+        """Run the project's commands (build / tests) like a developer would. With the keyboard:
+        typed into VS Code's own terminal. While you're busy (or no VS Code): run in the
+        background, output in the dashboard."""
+        project_dir = getattr(self.editor, "project_dir", None)
+        cmds = project_commands(project)
+        if not cmds or not project_dir or not os.path.isdir(project_dir):
+            return True
+        self.event("plan", "Running commands", " · ".join(cmds))
+        typed_cd = False
+        for cmd in cmds:
+            if not self._wait(random.uniform(3, 8) * self.cfg.think):
+                return False
+            cmd = localize_command(cmd)
+            use_vscode = self._hands.is_set() and self.editor.kind == "vscode"
+            self.stats["commands"] += 1
+            if use_vscode:
+                self.activity = "terminal"
+                self.event("term", f"$ {cmd}", "typed into the VS Code terminal")
+                self._term(f"$ {cmd}    # in the VS Code terminal")
+                base = 60.0 / (self.cfg.wpm * 5)
+                with self._act():
+                    if not self._hands.is_set():
+                        use_vscode = False
+                    else:
+                        self.editor.open_terminal()
+                        if not typed_cd:
+                            line = f'cd "{project_dir}"'
+                            if self._type_text(line, base, mirror=False) is None:
+                                return False
+                            pyautogui.press("enter")
+                            typed_cd = True
+                            time.sleep(random.uniform(0.6, 1.4))
+                        n = self._type_text(cmd, base, mirror=False)
+                        if n is None:
+                            return False
+                        if n == len(cmd):
+                            pyautogui.press("enter")
+                        else:
+                            use_vscode = False   # you grabbed the keyboard mid-command
+                if use_vscode:
+                    # let it run, watching the output (see the Preview in the dashboard)
+                    if not self._wait(random.uniform(12, 25) * self.cfg.think):
+                        return False
+                    continue
+            # background run, output captured for the dashboard
+            if not self._run_background(cmd, project_dir):
+                return False
+        self._need_refocus = True
+        return True
+
+    def _run_background(self, cmd, cwd):
+        self.activity = "terminal"
+        self.event("term", f"$ {cmd}", "running in the background")
+        self._term(f"$ {cmd}")
+        started = time.time()
+        try:
+            kw = {}
+            if sys.platform.startswith("win"):
+                kw["creationflags"] = 0x08000000  # no console window
+            self._proc = proc = subprocess.Popen(
+                cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", **kw)
+        except OSError as exc:
+            self._term(f"could not start: {exc}")
+            self.event("warn", f"{cmd} failed to start", str(exc))
+            return True
+
+        def pump():
+            for line in proc.stdout:
+                self._term(line.rstrip("\n"))
+        reader = threading.Thread(target=pump, daemon=True)
+        reader.start()
+        while proc.poll() is None:
+            if self._stop.is_set():
+                proc.kill()
+                return False
+            if time.time() - started > self.cfg.terminal_timeout:
+                proc.kill()
+                self._term(f"(stopped after {self.cfg.terminal_timeout:.0f}s)")
+                break
+            time.sleep(0.2)
+        reader.join(timeout=2)
+        code = proc.returncode
+        self._proc = None
+        took = time.time() - started
+        self._term(f"[exit {code} · {took:.1f}s]")
+        if code == 0:
+            self.event("verify", f"{cmd} passed", f"exit 0 in {took:.1f}s")
+        else:
+            self.event("warn", f"{cmd} exited with {code}", "see the Terminal tab")
+        return True
 
     # --------------------------------------------------------------- breaks
     def _break_loop(self):

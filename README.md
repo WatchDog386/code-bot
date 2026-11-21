@@ -63,10 +63,36 @@ light/dark), with a coding-agent workspace in the style of Cursor / Windsurf:
 
 - **Kill switch: press `Esc` twice quickly** (anywhere). Or **Stop** in the dashboard.
 - **F9** pauses / resumes.
-- **Just use your mouse or keyboard.** The bot notices at once, lets go of the mouse and stops
-  typing. When you've left everything alone for 20 seconds (configurable) it brings VS Code
-  back, puts the cursor at the end of the file and carries on exactly where it stopped.
+- **Just use your computer.** The moment you touch the mouse or keyboard the bot lets go of
+  both: the mouse stops moving and no more keystrokes are sent, so nothing lands in the window
+  you're working in. **The code keeps being written anyway**: the bot writes it straight into the
+  file on disk, word by word at the same pace, and VS Code shows the file growing. New files
+  appear in VS Code's explorer. When you've left the mouse and keyboard alone for 20 seconds
+  (configurable) it brings VS Code back, opens the file it's on, puts the cursor at the end
+  and carries on typing for real. Pressing **Resume** gives it the keyboard back straight away.
+  Don't type in the file the bot is writing while it works in the background.
+  (Turn this off with "Keep writing code while I work". Notepad mode always pauses instead.)
 - `Ctrl+C` in the terminal quits the server.
+
+## Terminal
+
+When a project is finished the bot runs its commands, like a developer checking their work:
+
+- **Bot has the keyboard:** it opens VS Code's own terminal (`Terminal: Focus Terminal`), `cd`s
+  into the project and types each command.
+- **You're busy (or not VS Code):** the commands run in the background, and the output shows up in
+  the dashboard's **Terminal** tab with the exit code.
+
+Commands come from a `.codebot-run` file in the project (one per line, `#` for comments).
+Without one, Go projects get `go build ./...` and Python projects get `python -m compileall -q .`.
+The sample projects run their tests. Turn this off under Settings > Screen & workspace.
+
+## Live preview
+
+The monitor button above the editor in the dashboard (or `preview` in the agent box) opens a
+**Preview** tab with a live picture of the bot's screen (VS Code, its terminal), updated every
+second. On macOS allow **Screen Recording** for your terminal / Python in System Settings >
+Privacy & Security.
 
 ## Multiple monitors
 

@@ -82,6 +82,11 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 since = 0
             return self._send(200, bot.live_status(since))
+        if url.path == "/api/screen.jpg":
+            data = bot.screenshot_jpeg()
+            if not data:
+                return self._send(503, {"error": "screen capture not available"})
+            return self._send(200, data, "image/jpeg")
         if url.path == "/api/project":
             name = q.get("name", "")
             if name not in list_projects():

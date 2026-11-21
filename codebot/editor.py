@@ -329,12 +329,13 @@ class VSCodeEditor:
                 shutil.rmtree(path, ignore_errors=True)
         self._save_manifest([n for n in ours if n in keep and os.path.isdir(os.path.join(self.ws, n))])
 
-    def begin_project(self, name):
-        self.focus(force=True)
-        mod = "command" if IS_MAC else "ctrl"
-        pyautogui.hotkey(mod, "k")         # Close all editors (Ctrl+K Ctrl+W)
-        pyautogui.hotkey(mod, "w")
-        time.sleep(0.5)
+    def begin_project(self, name, interactive=True):
+        if interactive:
+            self.focus(force=True)
+            mod = "command" if IS_MAC else "ctrl"
+            pyautogui.hotkey(mod, "k")         # Close all editors (Ctrl+K Ctrl+W)
+            pyautogui.hotkey(mod, "w")
+            time.sleep(0.5)
         ours = self._ours()
         keep = [n for n in ours if n != name] if self.keep_finished else []
         self.cleanup(keep=keep)            # workspace = just the project being written
@@ -350,25 +351,44 @@ class VSCodeEditor:
         self.log(f"New project: {os.path.basename(dest)}")
         time.sleep(1.0)
 
-    def begin_file(self, rel):
+    def begin_file(self, rel, show=True):
         path = os.path.join(self.project_dir, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         open(path, "w", encoding="utf-8").close()
+        if show:
+            self.show_file(path)
+        return path
+
+    def show_file(self, path):
+        """Open (or switch to) the file's tab. VS Code shows what's on disk."""
         self._run_cli(path)
         time.sleep(1.6)
         self.focus(force=True)
         time.sleep(0.3)
-        return path
 
     def end_file(self, path, expected):
         pyautogui.hotkey("command" if IS_MAC else "ctrl", "s")
         time.sleep(1.0)
+        return self.verify(path, expected)
+
+    def verify(self, path, expected):
         try:
             with open(path, encoding="utf-8") as fh:
                 typed = fh.read()
         except OSError:
             return None
         return _norm(typed) == _norm(expected)
+
+    def open_terminal(self):
+        """Focus VS Code's integrated terminal (creates one if needed)."""
+        self.focus(force=True)
+        mod = "command" if IS_MAC else "ctrl"
+        pyautogui.hotkey(mod, "shift", "p")
+        time.sleep(0.7)
+        pyautogui.write("Terminal: Focus Terminal", interval=0.03)
+        time.sleep(0.6)
+        pyautogui.press("enter")
+        time.sleep(2.0)
 
     def clear(self):
         pass
@@ -478,11 +498,12 @@ class NotepadEditor:
         place_window(rect, win_match=self._title_match, x_name=SCRATCH_NAME,
                      mac_process="TextEdit", mac_contains=SCRATCH_NAME)
 
-    def begin_project(self, name):
+    def begin_project(self, name, interactive=True):
         self.log(f"New project: {name}")
 
-    def begin_file(self, rel):
-        self.clear()
+    def begin_file(self, rel, show=True):
+        if show:
+            self.clear()
         return None
 
     def end_file(self, path, expected):
