@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "code-bot: dashboard (localhost:8765)",
+      "name": "Invotech 360: dashboard (localhost:8765)",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/app.py",
@@ -10,7 +10,7 @@
       "cwd": "${workspaceFolder}"
     },
     {
-      "name": "code-bot: dashboard + autostart",
+      "name": "Invotech 360: dashboard + autostart",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/app.py",
@@ -19,7 +19,7 @@
       "cwd": "${workspaceFolder}"
     },
     {
-      "name": "code-bot: terminal only",
+      "name": "Invotech 360: terminal only",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/code_bot.py",

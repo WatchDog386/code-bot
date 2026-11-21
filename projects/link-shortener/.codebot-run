@@ -1,6 +1,0 @@
-# Run after the project is written: typed into VS Code's terminal by the bot
-# (or run in the background while you use the keyboard).
-go vet ./...
-go test ./...
-serve: go run ./cmd/server
-open: http://localhost:8080/healthz

@@ -1,4 +1,0 @@
-# Run after the project is written: typed into VS Code's terminal by the bot
-# (or run in the background while you use the keyboard).
-npm install --no-audit --no-fund   # wait 60
-npx tsc --noEmit

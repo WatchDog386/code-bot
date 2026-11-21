@@ -2,13 +2,13 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "code-bot: install requirements",
+      "label": "Invotech 360: install requirements",
       "type": "shell",
       "command": "python -m pip install -r requirements.txt",
       "problemMatcher": []
     },
     {
-      "label": "code-bot: start dashboard",
+      "label": "Invotech 360: start dashboard",
       "type": "shell",
       "command": "python app.py",
       "isBackground": true,

@@ -1,4 +1,4 @@
-# code-bot
+# Invotech 360
 
 Writes real projects in VS Code nonstop, file by file, with human-like typing and mouse
 movement. You control it from a dashboard at **http://localhost:8765**.
@@ -34,12 +34,12 @@ Other commands:
 |---|---|
 | `python app.py --autostart` | open everything and start immediately |
 | `python code_bot.py` | terminal only, no dashboard |
-| `python code_bot.py --projects task-tracker-api --wpm 70` | one project, faster |
+| `python code_bot.py --projects fleet-api --wpm 70` | one library project, faster |
 | `python code_bot.py --editor notepad` | Notepad instead of VS Code |
 | `python code_bot.py --minutes 120 --breaks` | 2 hours, with short random breaks |
 | `python code_bot.py --think 1.5` | even longer thinking pauses (slower, more human) |
 
-Or press **F5** in VS Code and pick a "code-bot" launch config.
+Or press **F5** in VS Code and pick an "Invotech 360" launch config.
 
 ## The dashboard
 
@@ -51,7 +51,7 @@ light/dark), with a coding-agent workspace in the style of Cursor / Windsurf:
   and the agent panel lists each step (planned, created, thinking, verified...). There is also an
   Output / Problems / Session panel and a VS Code-style status bar. Click any file to open it in a
   tab.
-- **Ask the agent** - type in the agent box, e.g. `write link-shortener at 60 wpm`, `typing only`,
+- **Ask the agent** - type in the agent box, e.g. `new project in go`, `write fleet-api at 60 wpm`, `typing only`,
   `pause`, `stop`, `status` or `help`.
 - **Command palette** - `Ctrl+K` (or `Ctrl+Shift+P`) runs any action or opens any file.
 - **Overview** - KPI cards and the current run. **Projects** - choose and preview projects.
@@ -88,7 +88,8 @@ When a project is finished the bot works in the terminal like a developer:
 - **You have the keyboard (or not VS Code):** the same steps run in the background; the output,
   exit codes and whether the app answered show in the dashboard's **Terminal** tab.
 
-The steps come from a `.codebot-run` file in the project:
+New projects bring their own steps (see below). For a project you add to `projects/`, list
+them in a `.codebot-run` file, one per line, for example:
 
 ```
 python -m venv .venv
@@ -102,8 +103,6 @@ open: http://127.0.0.1:8000/docs
 `# wait N` = seconds to give a command in VS Code's terminal (the bot can't read that terminal),
 `{venv}` = the project's virtualenv (`.venv\Scripts\` on Windows, `.venv/bin/` elsewhere).
 Without the file, Go projects get `go build ./...` and Python projects `python -m compileall -q .`.
-The samples: task-tracker-api installs, tests and runs its API (docs page), link-shortener vets,
-tests and runs its server, inventory-dashboard installs and type-checks.
 Turn it off under Settings > Screen & workspace.
 
 ## Live preview
@@ -145,7 +144,8 @@ Records are added to the project until every file it types is over 1000 lines (t
 own tests. Small files a project needs (go.mod, package.json, README, `__init__.py`) are put in
 place instantly instead of being typed. Pick the languages under Settings > What to write.
 
-The **Projects** page also has a library of 9 ready projects (6 of them generated this way). To
+The **Projects** page also has a library of 6 ready projects made this way (clinic-service,
+school-service, fleet-api, warehouse-api, restaurant-kit, events-kit). To
 add more generated ones to the library:
 
 ```bash
@@ -154,8 +154,8 @@ python -m codebot.gen --out projects --count 6
 
 ## How it works
 
-- **Real projects**: `projects/` holds complete projects (Python FastAPI service, React +
-  TypeScript dashboard, Go URL shortener). The bot creates each file in the workspace, opens it
+- **Real projects**: a new project every run (or one from `projects/`). The bot creates each
+  file in the workspace, opens it
   as a VS Code tab and types it top to bottom. The explorer tree fills up like a real project,
   files autosave, then it moves on to the next project, forever.
 - **Clean code**: the workspace gets a `.vscode/settings.json` that turns off auto-closing

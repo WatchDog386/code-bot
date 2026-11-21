@@ -1,7 +1,0 @@
-go.mod
-internal/store/store.go
-internal/shortener/shortener.go
-internal/shortener/shortener_test.go
-internal/api/handlers.go
-cmd/server/main.go
-README.md

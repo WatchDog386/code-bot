@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-code-bot control panel, served at http://localhost:8765
+Invotech 360 control panel, served at http://localhost:8765
 
     python app.py                  # opens VS Code on your chosen screen + the dashboard
     python app.py --autostart      # also starts the bot immediately
@@ -146,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    p = argparse.ArgumentParser(description="code-bot control panel")
+    p = argparse.ArgumentParser(description="Invotech 360 control panel")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true", help="don't open the dashboard")
     p.add_argument("--no-editor", action="store_true", help="don't open Notepad on launch")
@@ -156,14 +156,14 @@ def main():
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError:
-        print(f"Port {args.port} is busy. Is code-bot already running? "
+        print(f"Port {args.port} is busy. Is Invotech 360 already running? "
               f"Try: python app.py --port {args.port + 1}")
         sys.exit(1)
 
     url = f"http://localhost:{args.port}"
     hot = bot.start_listeners()
     print("=" * 56)
-    print(f"  code-bot dashboard:  {url}")
+    print(f"  Invotech 360 dashboard:  {url}")
     print("  Kill switch: press Esc TWICE quickly.  F9 = pause/resume" if hot else
           "  (install pynput for the Esc-Esc kill switch)")
     print("  Use your mouse/keyboard any time - the bot pauses and waits for you")
