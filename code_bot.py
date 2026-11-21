@@ -5,10 +5,12 @@ Terminal-only version (no dashboard). Same engine as app.py.
     python code_bot.py                              # VS Code, writes projects nonstop
     python code_bot.py --editor notepad             # Notepad instead
     python code_bot.py --projects task-tracker-api  # only this project
-    python code_bot.py --wpm 70 --minutes 60 --breaks
+    python code_bot.py --monitor 2 --minutes 60 --breaks
+    python code_bot.py --list-screens
     python code_bot.py --source file --file path/to/code.py
 
-Stop: Ctrl+C, F10/Esc, or mouse into a screen corner. F9 = pause/resume.
+Kill switch: press Esc twice quickly (or Ctrl+C). F9 = pause/resume.
+Touch the mouse/keyboard and it pauses; it carries on after 20s of you being idle.
 """
 
 import argparse
@@ -34,10 +36,17 @@ def main():
     p.add_argument("--file", default="", help="file to type with --source file")
     p.add_argument("--languages", nargs="+", choices=LANGUAGES, default=LANGUAGES)
     p.add_argument("--mode", choices=["both", "mouse", "type"], default="both")
-    p.add_argument("--wpm", type=int, default=55)
+    p.add_argument("--wpm", type=int, default=34)
+    p.add_argument("--think", type=float, default=1.0, help="thinking-pause multiplier (0.5 - 3)")
+    p.add_argument("--monitor", type=int, default=0,
+                   help="screen number to use (1, 2, 3 ... ; 0 = auto). Run with --list-screens to see them")
+    p.add_argument("--list-screens", action="store_true", help="show the screens and exit")
+    p.add_argument("--no-detect", action="store_true", help="don't pause when you use the mouse/keyboard")
+    p.add_argument("--resume-after", type=float, default=20, help="idle seconds before continuing (0 = stay paused)")
+    p.add_argument("--keep-finished", action="store_true", help="keep finished projects in the workspace")
     p.add_argument("--typo-rate", type=float, default=0.015)
-    p.add_argument("--mouse-min", type=float, default=3.0)
-    p.add_argument("--mouse-max", type=float, default=10.0)
+    p.add_argument("--mouse-min", type=float, default=4.0)
+    p.add_argument("--mouse-max", type=float, default=14.0)
     p.add_argument("--minutes", type=float, default=0, help="auto-stop after N minutes")
     p.add_argument("--breaks", action="store_true", help="take short random breaks")
     p.add_argument("--no-scroll", action="store_true")
@@ -45,20 +54,14 @@ def main():
     p.add_argument("--delay", type=float, default=3)
     a = p.parse_args()
 
-    bot = Bot()
-    try:
-        from pynput import keyboard
+    if a.list_screens:
+        from codebot.engine import monitors_info
+        for m in monitors_info():
+            print(f"  {m['label']}   at ({m['x']}, {m['y']})")
+        return
 
-        def on_press(key):
-            if key == keyboard.Key.f9:
-                bot.toggle_pause()
-            elif key in (keyboard.Key.f10, keyboard.Key.esc):
-                bot.stop()
-        listener = keyboard.Listener(on_press=on_press)
-        listener.daemon = True
-        listener.start()
-    except Exception:  # noqa: BLE001
-        pass
+    bot = Bot()
+    bot.start_listeners()
 
     bot.start({
         "editor": a.editor, "source": a.source, "projects": a.projects,
@@ -67,7 +70,9 @@ def main():
         "mouse_min": a.mouse_min, "mouse_max": a.mouse_max, "minutes": a.minutes,
         "breaks": a.breaks, "scroll": not a.no_scroll, "review_moves": not a.no_review,
         "auto_open_editor": a.editor != "focused", "keep_focus": a.editor != "focused",
-        "start_delay": a.delay,
+        "start_delay": a.delay, "think": a.think, "monitor": a.monitor - 1,
+        "detect_user": not a.no_detect, "resume_after": a.resume_after,
+        "keep_finished": a.keep_finished,
     })
     try:
         while bot.running:

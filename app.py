@@ -2,11 +2,11 @@
 """
 code-bot control panel, served at http://localhost:8765
 
-    python app.py                  # opens VS Code (or Notepad) + the dashboard
+    python app.py                  # opens VS Code on your chosen screen + the dashboard
     python app.py --autostart      # also starts the bot immediately
     python app.py --port 9000 --no-browser --no-editor
 
-Hotkeys (anywhere): F9 = pause/resume, F10 or Esc = stop.
+Kill switch (anywhere): press Esc twice quickly. F9 = pause/resume.
 Emergency stop: shove the mouse into a corner of the screen.
 """
 
@@ -19,7 +19,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
-    from codebot.engine import Bot, Config
+    from codebot.engine import Bot, Config, monitors_info
     from codebot.projects import list_projects
     from codebot.snippets import LANGUAGES
 except ImportError as exc:
@@ -81,7 +81,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/settings":
             from dataclasses import asdict
             return self._send(200, {"config": asdict(load_settings()), "languages": LANGUAGES,
-                                    "projects": list_projects()})
+                                    "projects": list_projects(), "monitors": monitors_info()})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -95,8 +95,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/stop": bot.stop,
             "/api/pause": bot.pause,
             "/api/resume": bot.resume,
-            "/api/open-editor": lambda: (bot.make_editor(Config.from_dict(body or None)
-                                                          if body else load_settings()).open(), "opened"),
+            "/api/open-editor": lambda: (bot.open_editor(Config.from_dict(body) if body else load_settings()),
+                                         "opened"),
             "/api/settings": lambda: (save_settings(body), (True, "saved"))[1],
         }
         fn = routes.get(self.path)
@@ -104,28 +104,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, {"error": "not found"})
         ok, msg = fn()
         self._send(200, {"ok": bool(ok), "message": msg, "status": bot.status()})
-
-
-def start_hotkeys():
-    try:
-        from pynput import keyboard
-    except ImportError:
-        return False
-
-    def on_press(key):
-        if key == keyboard.Key.f9:
-            bot.toggle_pause()
-        elif key in (keyboard.Key.f10, keyboard.Key.esc):
-            if bot.running:
-                bot.stop()
-
-    try:
-        listener = keyboard.Listener(on_press=on_press)
-        listener.daemon = True
-        listener.start()
-        return True
-    except Exception:  # noqa: BLE001
-        return False
 
 
 def main():
@@ -144,17 +122,17 @@ def main():
         sys.exit(1)
 
     url = f"http://localhost:{args.port}"
-    hot = start_hotkeys()
+    hot = bot.start_listeners()
     print("=" * 56)
     print(f"  code-bot dashboard:  {url}")
-    print("  Hotkeys: F9 pause/resume, F10/Esc stop" if hot else
-          "  (install pynput for F9/F10 hotkeys)")
-    print("  Emergency stop: mouse into a screen corner")
+    print("  Kill switch: press Esc TWICE quickly.  F9 = pause/resume" if hot else
+          "  (install pynput for the Esc-Esc kill switch)")
+    print("  Use your mouse/keyboard any time - the bot pauses and waits for you")
     print("  Quit server: Ctrl+C")
     print("=" * 56, flush=True)
 
     if not args.no_editor:
-        threading.Thread(target=lambda: bot.make_editor(load_settings()).open(), daemon=True).start()
+        threading.Thread(target=lambda: bot.open_editor(load_settings()), daemon=True).start()
     if not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     if args.autostart:

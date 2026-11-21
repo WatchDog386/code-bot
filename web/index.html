@@ -19,6 +19,7 @@
           background: var(--line); color: var(--muted); text-transform: uppercase; }
   .pill.running { background: rgba(47,191,113,.15); color: var(--green); }
   .pill.paused, .pill.break, .pill.starting { background: rgba(240,164,58,.15); color: var(--amber); }
+  .pill.you { background: rgba(79,140,255,.15); color: var(--accent); }
   .pill.stopped { background: rgba(239,83,80,.12); color: var(--red); }
   .spacer { flex: 1; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -72,7 +73,7 @@
     <h1>code-bot</h1>
     <span id="state" class="pill">idle</span>
     <div class="spacer"></div>
-    <span class="muted"><kbd>F9</kbd> pause · <kbd>F10</kbd>/<kbd>Esc</kbd> stop · mouse into a corner = emergency stop</span>
+    <span class="muted">Kill switch: <kbd>Esc</kbd> <kbd>Esc</kbd> · <kbd>F9</kbd> pause · touch the mouse and it waits for you</span>
   </header>
 
   <div class="grid">
@@ -111,6 +112,8 @@
       </div>
       <label>Typing speed: <b id="wpmv"></b> WPM</label>
       <input type="range" id="wpm" min="10" max="150" step="5">
+      <label>Thinking pauses: <b id="thinkv"></b>x</label>
+      <input type="range" id="think" min="0.5" max="3" step="0.1">
       <label>Typo rate: <b id="typov"></b>%</label>
       <input type="range" id="typo_rate" min="0" max="10" step="0.5">
       <div class="row">
@@ -127,6 +130,11 @@
         <label><input type="checkbox" id="auto_open_editor"> Auto-open editor</label>
         <label><input type="checkbox" id="keep_focus"> Keep editor focused</label>
         <label><input type="checkbox" id="review_moves"> Re-read code (arrow up/down)</label>
+        <label><input type="checkbox" id="detect_user"> Pause when I use the mouse</label>
+      </div>
+      <div class="row">
+        <div><label>Continue after I'm idle for (s, 0 = wait for me)</label><input type="number" id="resume_after" min="0" step="5"></div>
+        <div></div>
       </div>
     </section>
 
@@ -158,9 +166,19 @@
         <label>File to type (full path)</label>
         <input type="text" id="custom_file" placeholder="C:\Users\me\projects\app\main.py">
       </div>
+      <div class="row">
+        <div><label>Screen for the bot</label><select id="monitor"></select></div>
+        <div><label>&nbsp;</label>
+          <div class="checks" style="grid-template-columns:1fr;margin:0">
+            <label><input type="checkbox" id="maximize"> Maximize editor on that screen</label>
+          </div></div>
+      </div>
       <div id="box_ws">
         <label>VS Code workspace folder (projects get created here)</label>
         <input type="text" id="workspace_dir" placeholder="~/dev-projects">
+        <div class="checks" style="grid-template-columns:1fr">
+          <label><input type="checkbox" id="keep_finished"> Keep finished projects (off = only the current project folder)</label>
+        </div>
       </div>
       <label>Start delay (seconds)</label>
       <input type="number" id="start_delay" min="0" step="1">
@@ -176,7 +194,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-let languages = [], projects = [];
+let languages = [], projects = [], monitors = [];
 
 function fmt(sec) {
   sec = Math.max(0, Math.floor(sec));
@@ -206,6 +224,12 @@ function readForm() {
     auto_open_editor: $("auto_open_editor").checked,
     keep_focus: $("keep_focus").checked,
     review_moves: $("review_moves").checked,
+    detect_user: $("detect_user").checked,
+    keep_finished: $("keep_finished").checked,
+    maximize: $("maximize").checked,
+    resume_after: +$("resume_after").value,
+    think: +$("think").value,
+    monitor: +$("monitor").value,
     languages: [...document.querySelectorAll("#langs input:checked")].map((i) => i.value),
     projects: [...document.querySelectorAll("#projects input:checked")].map((i) => i.value),
     custom_file: $("custom_file").value.trim(),
@@ -222,7 +246,13 @@ function fillForm(c) {
   $("typo_rate").value = (c.typo_rate * 100).toFixed(1); $("typov").textContent = (c.typo_rate * 100).toFixed(1);
   for (const k of ["mouse_min", "mouse_max", "minutes", "clear_after_lines", "start_delay", "custom_file",
                    "editor", "source", "workspace_dir"]) $(k).value = c[k];
-  for (const k of ["scroll", "breaks", "auto_open_editor", "keep_focus", "review_moves"]) $(k).checked = !!c[k];
+  for (const k of ["scroll", "breaks", "auto_open_editor", "keep_focus", "review_moves", "detect_user",
+                   "keep_finished", "maximize"]) $(k).checked = !!c[k];
+  $("resume_after").value = c.resume_after;
+  $("think").value = c.think; $("thinkv").textContent = (+c.think).toFixed(1);
+  $("monitor").innerHTML = '<option value="-1">Auto (a side screen)</option>' +
+    monitors.map((m) => `<option value="${m.index}">${m.label}</option>`).join("");
+  $("monitor").value = String(c.monitor);
   $("projects").innerHTML = projects.map((p) =>
     `<label><input type="checkbox" value="${p}" ${c.projects.includes(p) ? "checked" : ""}> ${p}</label>`).join("")
     || '<span class="muted">No folders in projects/</span>';
@@ -239,11 +269,14 @@ async function api(path, body) {
 
 function render(st) {
   const state = st.state;
-  $("state").textContent = state; $("state").className = "pill " + state;
+  $("state").textContent = state === "you" ? "you have control" : state;
+  $("state").className = "pill " + state;
   $("start").disabled = st.running;
   $("stop").disabled = !st.running;
   $("pause").disabled = !st.running || state === "starting";
-  $("pause").textContent = state === "paused" ? "▶ Resume" : "❚❚ Pause";
+  if (state === "you") $("info").textContent = st.stats.resume_in
+      ? `Waiting for you - continues in ${st.stats.resume_in}s of idle` : "Waiting for you - press Resume";
+  $("pause").textContent = ["paused", "you", "break"].includes(state) ? "▶ Resume" : "❚❚ Pause";
   const s = st.stats;
   $("s_uptime").textContent = fmt(s.uptime);
   $("s_chars").textContent = s.chars.toLocaleString();
@@ -261,7 +294,7 @@ function render(st) {
       (s.mismatched ? `, ${s.mismatched} differ` : "") : "";
   }
   $("s_left").textContent = s.ends_at && st.running ? fmt(s.ends_at - Date.now() / 1000) : "∞";
-  $("info").textContent = st.editor ? "Editor: " + st.editor : "";
+  if (state !== "you") $("info").textContent = [st.editor, st.monitor].filter(Boolean).join(" · ");
   const log = $("log"); const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 10;
   log.textContent = st.logs.join("\n");
   if (atBottom) log.scrollTop = log.scrollHeight;
@@ -273,6 +306,7 @@ async function poll() {
 
 $("wpm").oninput = () => $("wpmv").textContent = $("wpm").value;
 $("typo_rate").oninput = () => $("typov").textContent = $("typo_rate").value;
+$("think").oninput = () => $("thinkv").textContent = (+$("think").value).toFixed(1);
 $("start").onclick = async () => render((await api("/api/start", readForm())).status);
 $("stop").onclick = async () => render((await api("/api/stop", {})).status);
 $("pause").onclick = async () => {
@@ -286,7 +320,7 @@ document.addEventListener("change", (e) => { if (e.target.closest(".card")) api(
 
 (async () => {
   const s = await api("/api/settings");
-  languages = s.languages; projects = s.projects; fillForm(s.config);
+  languages = s.languages; projects = s.projects; monitors = s.monitors || []; fillForm(s.config);
   poll(); setInterval(poll, 1000);
 })();
 </script>

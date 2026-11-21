@@ -12,13 +12,45 @@ import time
 
 import pyautogui
 
-SAFE_MARGIN = 40  # stay away from the screen corners (pyautogui fail-safe)
+SAFE_MARGIN = 40  # stay away from the screen edges/corners
+
+# The rectangle (x, y, w, h) the bot's mouse is allowed to use: one monitor.
+BOUNDS = None
+# Last position the bot itself put the cursor at (used to notice when *you* move it).
+last_pos = None
+last_move_time = 0.0
+# called when the cursor isn't where the bot left it mid-move (someone grabbed the mouse)
+on_interfere = None
+
+
+def set_bounds(rect):
+    global BOUNDS
+    BOUNDS = tuple(int(v) for v in rect) if rect else None
+
+
+def bounds():
+    if BOUNDS:
+        return BOUNDS
+    w, h = pyautogui.size()
+    return (0, 0, w, h)
 
 
 def _clamp(x, y):
-    w, h = pyautogui.size()
-    return (min(max(SAFE_MARGIN, x), w - SAFE_MARGIN),
-            min(max(SAFE_MARGIN, y), h - SAFE_MARGIN))
+    bx, by, bw, bh = bounds()
+    return (min(max(bx + SAFE_MARGIN, x), bx + bw - SAFE_MARGIN),
+            min(max(by + SAFE_MARGIN, y), by + bh - SAFE_MARGIN))
+
+
+def _put(x, y):
+    global last_pos, last_move_time
+    last_pos = (x, y)
+    last_move_time = time.time()
+    pyautogui.moveTo(x, y, _pause=False)
+
+
+def inside(x, y):
+    bx, by, bw, bh = bounds()
+    return bx <= x < bx + bw and by <= y < by + bh
 
 
 def _min_jerk(t):
@@ -51,19 +83,30 @@ def _segment(x0, y0, x1, y1, speed=1.0, stop=None):
     for i in range(1, steps + 1):
         if stop is not None and stop():
             return
+        if last_pos is not None and i % 3 == 0:
+            cx, cy = pyautogui.position()
+            if abs(cx - last_pos[0]) + abs(cy - last_pos[1]) > 12:
+                if on_interfere:
+                    on_interfere()
+                return
         t = _min_jerk(i / steps)
         x, y = _bezier((x0, y0), c1, c2, (x1, y1), t)
         fade = 1 - i / steps  # tremor fades as the hand settles on target
         x += random.gauss(0, tremor) * fade
         y += random.gauss(0, tremor) * fade
-        pyautogui.moveTo(*_clamp(round(x), round(y)), _pause=False)
+        _put(*_clamp(round(x), round(y)))
         time.sleep(dt)
 
 
 def move_to(x, y, speed=1.0, stop=None):
-    """Move like a person to (x, y)."""
+    """Move like a person to (x, y), staying inside BOUNDS."""
     x, y = _clamp(int(x), int(y))
     x0, y0 = pyautogui.position()
+    if not inside(x0, y0):
+        # cursor is on another monitor - a real hand would just appear from the
+        # screen edge, so start the path from the nearest edge of our screen
+        x0, y0 = _clamp(x0, y0)
+        _put(x0, y0)
     dist = math.hypot(x - x0, y - y0)
     if dist > 250 and random.random() < 0.35:
         # overshoot the target a little, then correct back
@@ -73,18 +116,26 @@ def move_to(x, y, speed=1.0, stop=None):
         ox, oy = _clamp(int(ox), int(oy))
         _segment(x0, y0, ox, oy, speed, stop)
         time.sleep(random.uniform(0.03, 0.12))
+        if stop is not None and stop():
+            return
         _segment(ox, oy, x, y, speed * 1.6, stop)
     else:
         _segment(x0, y0, x, y, speed, stop)
     # final settle: real cursors rarely land on the exact pixel and freeze
     if random.random() < 0.4:
         time.sleep(random.uniform(0.05, 0.2))
+        if stop is not None and stop():
+            return
         _segment(x, y, *_clamp(x + random.randint(-3, 3), y + random.randint(-3, 3)), speed * 2, stop)
 
 
 def micro_drift(stop=None):
     """Tiny resting-hand movement of a few pixels."""
     x, y = pyautogui.position()
+    if not inside(x, y):  # cursor is on another screen: come back to ours first
+        bx, by, bw, bh = bounds()
+        move_to(bx + bw * random.uniform(0.3, 0.7), by + bh * random.uniform(0.3, 0.7), stop=stop)
+        return
     move_to(x + random.randint(-25, 25), y + random.randint(-18, 18), speed=0.6, stop=stop)
 
 

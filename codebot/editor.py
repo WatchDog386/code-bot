@@ -74,7 +74,7 @@ WORKSPACE_SETTINGS = {
     "explorer.confirmDelete": False,
     "git.openRepositoryInParentFolders": "never",
     "extensions.ignoreRecommendations": True,
-    "files.exclude": {"**/.codebot": True},
+    "files.exclude": {"**/.codebot": True, ".vscode": True},
     "codebot.managed": True,
 }
 
@@ -139,6 +139,48 @@ class _WindowsFocus:
         return "refocused"
 
 
+def place_window(rect, win_match=None, x_name=None, mac_process=None, mac_contains=None):
+    """Move a window onto the monitor `rect` (x, y, w, h) and maximize it there."""
+    x, y, w, h = rect
+    try:
+        if IS_WIN and win_match:
+            win = _WindowsFocus.find(win_match)
+            if win is None:
+                return False
+            if win.isMaximized or win.isMinimized:
+                win.restore()
+                time.sleep(0.3)
+            win.moveTo(x + 40, y + 40)
+            win.resizeTo(max(600, w - 80), max(400, h - 80))
+            time.sleep(0.2)
+            win.maximize()          # maximizes on the monitor the window is on
+            return True
+        if IS_MAC and mac_process:
+            script = (f'tell application "System Events" to tell process "{mac_process}"\n'
+                      f'  set win to (first window whose name contains "{mac_contains}")\n'
+                      f'  set position of win to {{{x}, {y}}}\n'
+                      f'  set size of win to {{{w}, {h}}}\n'
+                      'end tell')
+            subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
+            return True
+        if x_name and shutil.which("xdotool"):
+            ids = subprocess.run(["xdotool", "search", "--name", x_name], capture_output=True,
+                                 text=True, timeout=3).stdout.split()
+            for wid in ids:
+                if shutil.which("wmctrl"):
+                    subprocess.run(["wmctrl", "-i", "-r", wid, "-b", "remove,maximized_vert,maximized_horz"],
+                                   capture_output=True, timeout=3)
+                subprocess.run(["xdotool", "windowmove", wid, str(x), str(y)], capture_output=True, timeout=3)
+                subprocess.run(["xdotool", "windowsize", wid, str(w), str(h)], capture_output=True, timeout=3)
+                if shutil.which("wmctrl"):
+                    subprocess.run(["wmctrl", "-i", "-r", wid, "-b", "add,maximized_vert,maximized_horz"],
+                                   capture_output=True, timeout=3)
+            return bool(ids)
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 # =============================================================================
 class VSCodeEditor:
     kind = "vscode"
@@ -151,6 +193,8 @@ class VSCodeEditor:
         self.name = "VS Code"
         self.cli = find_code_cli()
         self.project_dir = None
+        self.screen = None          # (x, y, w, h) of the monitor we live on
+        self.keep_finished = False  # False = only the current project stays in the workspace
         self._launched = False
         self._last_focus = 0.0
 
@@ -238,27 +282,70 @@ class VSCodeEditor:
             w = _WindowsFocus.find(self._title_match)
             if w is not None and w.width > 200:
                 return (w.left, w.top, w.width, w.height)
+        if self.screen:
+            return self.screen
         sw, sh = pyautogui.size()
         return (0, 0, sw, sh)
 
+    def place(self, rect):
+        if place_window(rect, win_match=self._title_match,
+                        x_name=f"{self.root_name} - Visual Studio Code",
+                        mac_process="Code", mac_contains=self.root_name):
+            time.sleep(0.4)
+
     # ------------------------------------------------------------ project
+    def _manifest_path(self):
+        return os.path.join(self.ws, ".vscode", "codebot-projects.json")
+
+    def _manifest(self):
+        try:
+            with open(self._manifest_path(), encoding="utf-8") as fh:
+                return [n for n in json.load(fh) if isinstance(n, str)]
+        except (OSError, ValueError):
+            return []
+
+    def _save_manifest(self, names):
+        os.makedirs(os.path.dirname(self._manifest_path()), exist_ok=True)
+        with open(self._manifest_path(), "w", encoding="utf-8") as fh:
+            json.dump(sorted(set(names)), fh, indent=2)
+
+    def _ours(self):
+        """Folders in the workspace that the bot created (manifest + old-style markers)."""
+        names = set(self._manifest())
+        try:
+            for d in os.listdir(self.ws):
+                if os.path.exists(os.path.join(self.ws, d, MARKER)):
+                    names.add(d)
+        except OSError:
+            pass
+        return {n for n in names if "/" not in n and "\\" not in n and n not in ("", ".", "..", ".vscode")}
+
+    def cleanup(self, keep=()):
+        """Delete bot-created project folders (never anything else)."""
+        ours = self._ours()
+        for name in ours - set(keep):
+            path = os.path.join(self.ws, name)
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+        self._save_manifest([n for n in ours if n in keep and os.path.isdir(os.path.join(self.ws, n))])
+
     def begin_project(self, name):
         self.focus(force=True)
         mod = "command" if IS_MAC else "ctrl"
         pyautogui.hotkey(mod, "k")         # Close all editors (Ctrl+K Ctrl+W)
         pyautogui.hotkey(mod, "w")
         time.sleep(0.5)
+        ours = self._ours()
+        keep = [n for n in ours if n != name] if self.keep_finished else []
+        self.cleanup(keep=keep)            # workspace = just the project being written
         dest = os.path.join(self.ws, name)
-        if os.path.exists(dest):
-            if os.path.exists(os.path.join(dest, MARKER)):
-                shutil.rmtree(dest, ignore_errors=True)
-            else:  # never delete folders we didn't create
-                n = 2
-                while os.path.exists(f"{dest}-{n}"):
-                    n += 1
-                dest = f"{dest}-{n}"
+        if os.path.exists(dest):            # a folder we didn't create: never touch it
+            n = 2
+            while os.path.exists(f"{dest}-{n}"):
+                n += 1
+            dest = f"{dest}-{n}"
         os.makedirs(dest, exist_ok=True)
-        open(os.path.join(dest, MARKER), "w").close()
+        self._save_manifest(keep + [os.path.basename(dest)])
         self.project_dir = dest
         self.log(f"New project: {os.path.basename(dest)}")
         time.sleep(1.0)
@@ -309,6 +396,7 @@ class NotepadEditor:
         self.path = scratch_path()
         self.proc = None
         self.name = None
+        self.screen = None
         self._last_focus = 0.0
 
     def _title_match(self, title):
@@ -381,8 +469,14 @@ class NotepadEditor:
             w = _WindowsFocus.find(self._title_match)
             if w is not None and w.width > 200:
                 return (w.left, w.top, w.width, w.height)
+        if self.screen:
+            return self.screen
         sw, sh = pyautogui.size()
         return (0, 0, sw, sh)
+
+    def place(self, rect):
+        place_window(rect, win_match=self._title_match, x_name=SCRATCH_NAME,
+                     mac_process="TextEdit", mac_contains=SCRATCH_NAME)
 
     def begin_project(self, name):
         self.log(f"New project: {name}")
@@ -408,6 +502,9 @@ class FocusedWindowEditor(NotepadEditor):
     def open(self):
         self.name = "focused window"
         return True
+
+    def place(self, rect):
+        pass
 
     def focus(self, force=False):
         return "ok"

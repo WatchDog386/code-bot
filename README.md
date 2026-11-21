@@ -37,13 +37,32 @@ Other commands:
 | `python code_bot.py --projects task-tracker-api --wpm 70` | one project, faster |
 | `python code_bot.py --editor notepad` | Notepad instead of VS Code |
 | `python code_bot.py --minutes 120 --breaks` | 2 hours, with short random breaks |
+| `python code_bot.py --think 1.5` | even longer thinking pauses (slower, more human) |
 
 Or press **F5** in VS Code and pick a "code-bot" launch config.
 
-## Stop
+## Stop / take over
 
-**Stop** in the dashboard, **F10** or **Esc**. **F9** pauses/resumes.
-Emergency: shove the mouse into any **corner** of the screen. `Ctrl+C` quits the server.
+- **Kill switch: press `Esc` twice quickly** (anywhere). Or **Stop** in the dashboard.
+- **F9** pauses / resumes.
+- **Just use your mouse or keyboard.** The bot notices at once, lets go of the mouse and stops
+  typing. When you've left everything alone for 20 seconds (configurable) it brings VS Code
+  back, puts the cursor at the end of the file and carries on exactly where it stopped.
+- `Ctrl+C` in the terminal quits the server.
+
+## Multiple monitors
+
+Pick the screen in the dashboard ("Screen for the bot"), or from the terminal:
+
+```bash
+python code_bot.py --list-screens
+```
+```bash
+python code_bot.py --monitor 3
+```
+
+Screens are numbered left to right. VS Code is moved to that screen and maximized there, and
+the bot's mouse never leaves it. "Auto" picks a side screen (not your main one).
 
 ## How it works
 
@@ -55,6 +74,12 @@ Emergency: shove the mouse into any **corner** of the screen. `Ctrl+C` quits the
   brackets/quotes, auto-indent, IntelliSense, Copilot and format-on-save, so what gets typed is
   exactly the source. After each file the bot checks that the saved file matches the source
   ("files verified clean" in the dashboard).
+- **Clean workspace**: the workspace only ever holds the project being written. When a new
+  project starts, the previous one is deleted (tick "Keep finished projects" to keep them).
+  Folders you put there yourself are never touched, and `.vscode` is hidden from the explorer.
+- **Human pace**: about 34 WPM raw, plus thinking pauses before functions, between lines,
+  between files (6-20 s) and projects (25-60 s), and occasional 5-14 s "stop and think"
+  moments. The "Thinking pauses" slider scales all of them.
 - **Human typing**: word-by-word rhythm, slower on symbols and capitals, thinking pauses before
   functions and classes, typos fixed with backspace, occasional back-up-and-retype, arrowing up to
   re-read code, Ctrl+S now and then, speed drifting over time.
