@@ -423,6 +423,7 @@
       <span class="pill" id="state">idle</span>
       <span class="crumb" id="barCrumb"></span>
       <div class="spacer"></div>
+      <button class="btn primary sm hidden" id="installBtn" title="Install Invotech 360 as an app (then pin it to the taskbar)"><span data-i="external"></span>Install app</button>
       <button class="search" id="searchBtn" aria-label="Command palette"><span data-i="search"></span><span>Search commands</span><kbd>Ctrl K</kbd></button>
       <div class="switch" id="darkSwitch" role="switch" tabindex="0" aria-label="Dark mode"><div class="track"></div><span>Dark</span></div>
       <button class="icon-btn" id="bellBtn" aria-label="Activity"><span data-i="bell"></span><span class="badge hidden" id="bellBadge">0</span></button>
@@ -1604,6 +1605,18 @@ document.addEventListener("keydown", (e) => {
   else if (mod && (e.key === "l" || e.key === "L")) { e.preventDefault(); go("agent"); $("ask").focus(); }
   else if (e.key === "Escape" && !$("scrim").classList.contains("hidden")) closePalette();
 });
+
+/* ================================================================ install as an app */
+let installPrompt = null;
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installPrompt = e; $("installBtn").classList.remove("hidden"); });
+window.addEventListener("appinstalled", () => { $("installBtn").classList.add("hidden"); toast("Installed - pin it from the Start menu or the taskbar"); });
+$("installBtn").onclick = async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice;
+  installPrompt = null; $("installBtn").classList.add("hidden");
+};
 
 /* ================================================================ boot */
 paintIcons(); paintDark();

@@ -30,7 +30,12 @@ python install.py
 - **macOS**: a LaunchAgent (at login and every day at 03:00) and a launcher on the desktop.
 - **Linux**: an autostart entry, a desktop launcher and a cron entry at 03:00.
 
-**Pin it to the taskbar** (Windows doesn't let programs pin themselves): open Start, type
+**Install it as an app and pin it:** open the dashboard and click **Install app** (top bar,
+green). Edge/Chrome install Invotech 360 with its own icon and window; Edge's dialog has a
+*Pin to taskbar* option. (If you don't see the button: in Edge, *... > Apps > Install this site
+as an app*; in Chrome, the install icon at the right of the address bar.)
+
+**Or pin the shortcut** (Windows doesn't let programs pin themselves): open Start, type
 *Invotech 360*, right-click it and choose **Pin to taskbar**. (Or right-click the desktop icon >
 *Show more options* > *Pin to taskbar*.) Clicking it opens the dashboard in its own window with
 the Invotech 360 icon, like an app, not as a browser tab. In Edge you can also use

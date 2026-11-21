@@ -133,13 +133,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, st)
         if self.path == "/manifest.webmanifest":
             return self._send(200, {
-                "name": "Invotech 360", "short_name": "Invotech 360", "start_url": "/", "display": "standalone",
-                "background_color": "#0E2135", "theme_color": "#0E2135",
-                "icons": [{"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}],
+                "id": "/", "name": "Invotech 360", "short_name": "Invotech 360",
+                "description": "Coding agent dashboard", "start_url": "/", "scope": "/",
+                "display": "standalone", "background_color": "#0E2135", "theme_color": "#0E2135",
+                "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                          {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                          {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
             }, "application/manifest+json")
-        if self.path == "/icon-512.png":
-            with open(os.path.join(HERE, "assets", "invotech360.png"), "rb") as fh:
+        if self.path in ("/icon-512.png", "/icon-192.png"):
+            name = "invotech360.png" if "512" in self.path else "invotech360-192.png"
+            with open(os.path.join(HERE, "assets", name), "rb") as fh:
                 return self._send(200, fh.read(), "image/png")
+        if self.path == "/sw.js":
+            # tiny service worker: lets Edge / Chrome install the dashboard as an app
+            return self._send(200, (
+                'self.addEventListener("install", () => self.skipWaiting());\n'
+                'self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));\n'
+                'self.addEventListener("fetch", (e) => e.respondWith(fetch(e.request)));\n').encode(),
+                "text/javascript")
         if self.path in ("/favicon.ico", "/favicon.png"):
             with open(FAVICON, "rb") as fh:
                 return self._send(200, fh.read(), "image/png")
