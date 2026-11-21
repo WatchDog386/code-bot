@@ -138,7 +138,7 @@ class Scheduler:
             self._saved = time.time()
 
         # you stopped it (Stop, Esc Esc, time limit): no automatic restart until tomorrow
-        if self._was_running and not bot.running and bot.stop_reason != "schedule":
+        if self._was_running and not bot.running and bot.stop_reason not in ("schedule", "agent"):
             self.held_day = key
             bot.log(f"Stopped by you - the schedule starts it again at {cfg.schedule_start} tomorrow")
         cap = self.cap(cfg)

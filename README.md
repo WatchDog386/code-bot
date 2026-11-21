@@ -16,6 +16,36 @@ python -m pip install -r requirements.txt
   **Input Monitoring**. In VS Code run **"Shell Command: Install 'code' command in PATH"**.
 - Linux: X11 only; `sudo apt install python3-tk xdotool`.
 
+## AI agent and chat (Groq)
+
+Add your Groq API key under **Settings > AI** (free at console.groq.com; it stays in
+`settings.json` on your computer and is never shown in the page), press **Save & test**, and
+pick a model. Then, in the panel on the right of the Agent page:
+
+- **Agent mode** - give it a task ("build a REST API for a todo list with tests", "make a
+  monthly budget spreadsheet"). It plans the work and does it in the VS Code window it opened:
+  it types the files, runs commands in VS Code's terminal and **reads their output**, fixes
+  errors, starts the app and opens it next to the code, and fills spreadsheets in WPS Office.
+  Every step appears as a card (file written, command and its result...). ■ stops it.
+  Tick the project chip to work in the current project instead of a new folder.
+- **Chat mode** - ask about your code; the open file is included (chip), add more with `@file`.
+  Answers are formatted, code blocks have a Copy button, the conversation is kept.
+- Model picker, token count, quick-start suggestions, new-conversation button.
+
+The agent only works inside its project folder. While you use the keyboard it runs commands in
+the background instead of typing (the output still reaches the agent). Command output is
+copied to `.invotech/` in the project so the agent can read it (on Windows the terminal is
+PowerShell, VS Code's default).
+
+## Spreadsheet projects (WPS Office / Excel)
+
+**Projects > Spreadsheet project** (or Settings > What to write > Spreadsheet projects) makes
+the bot work in **WPS Office** instead of VS Code (Excel or LibreOffice Calc if WPS isn't
+installed): it creates workbooks - monthly budget, sales report, inventory valuation, payroll,
+class results, expense claims, project tracker - opens them, and types them cell by cell with
+real formulas (SUM, AVERAGE, IF, SUMIF, COUNTIF, INDEX/MATCH, RANK), makes the header bold
+and saves. **Programming project** goes back to VS Code.
+
 ## Install: desktop icon, start at sign-in, every day at 3 AM
 
 Run this once (Windows: just double-click **install_windows.bat**):
