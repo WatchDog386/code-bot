@@ -156,7 +156,8 @@ the system menu bar, so there it uses the command palette.)
 
 ## Terminal
 
-When a project is finished the bot works in the terminal like a developer:
+Off by default (the bot only types code in the editor). Turn on "After writing a project, run it in
+VS Code's terminal" under Settings > Screen & workspace to get this:
 
 - **Bot has the keyboard:** it opens a new VS Code terminal (`Terminal: Create New Terminal`),
   `cd`s into the project and types each command: install, tests, build. Then it **starts the

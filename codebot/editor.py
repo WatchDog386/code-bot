@@ -72,6 +72,9 @@ WORKSPACE_SETTINGS = {
     "workbench.editor.enablePreview": False,
     "workbench.startupEditor": "none",
     "explorer.autoReveal": False,           # don't keep expanding folders in the explorer
+    "terminal.integrated.enablePersistentSessions": False,   # no old terminals / "History restored"
+    "terminal.integrated.persistentSessionReviveProcess": "never",
+    "terminal.integrated.hideOnStartup": "always",
     "editor.stickyScroll.enabled": False,   # no lines pinned at the top of the editor
     "editor.mouseWheelZoom": False,         # Ctrl + mouse wheel never changes the font size
     "workbench.tips.enabled": False,
@@ -369,6 +372,21 @@ class VSCodeEditor:
                         "View: Close Primary Side Bar"):
             self._palette(command, settle=0.5)
             pyautogui.press("escape")       # close the palette if that command doesn't exist
+
+    def clean_start(self):
+        """Right after VS Code opens: close the files and terminals it restored from last
+        time, the side bars and the panel - only if VS Code is really in front."""
+        self.focus(force=True)
+        time.sleep(0.6)
+        if self.is_active() is False:
+            return
+        mod = "command" if IS_MAC else "ctrl"
+        pyautogui.hotkey(mod, "k")
+        pyautogui.hotkey(mod, "w")              # close all editors
+        time.sleep(0.4)
+        self._palette("Terminal: Kill All Terminals", settle=0.5)
+        pyautogui.press("escape")
+        self.tidy()
 
     def begin_project(self, name, interactive=True):
         if interactive:

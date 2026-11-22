@@ -77,7 +77,7 @@ class Config:
     detect_user: bool = True           # step aside when you use the mouse/keyboard
     mouse_resume: float = 1.0          # take the mouse back this soon after you stop moving it
     background_typing: bool = True     # VS Code: if you take the keyboard, keep writing the file on disk
-    run_terminal: bool = True          # open VS Code's terminal and build/test/run the project when done
+    terminal_after_project: bool = False   # off = only type the code in the editor (no terminal at all)
     serve_seconds: float = 45          # how long a started app is left running (and shown) before Ctrl+C
     terminal_timeout: float = 300      # seconds before a background command is stopped
     resume_after: float = 5.0          # keyboard: take it back after this many idle seconds (0 = never)
@@ -305,6 +305,9 @@ class Bot:
         ok = self.editor.open()
         if ok and cfg.maximize:
             self.editor.place(self.monitor.work)
+        if ok and hasattr(self.editor, "clean_start"):
+            with self._act():
+                self.editor.clean_start()       # no old files, terminals or side bars
         return ok
 
     # ------------------------------------------------------------- controls
@@ -667,9 +670,8 @@ class Bot:
                               speed=0.7, stop=stop)
             elif r < 0.8:
                 human.micro_drift(stop=stop)
-            else:   # glance at the explorer to see the file in the tree
-                human.move_to(*point_in(layout.explorer(), fx=random.uniform(0.2, 0.7), fy=random.uniform(0.05, 0.5)),
-                              stop=stop)
+            else:   # follow the last few lines that were written
+                human.read_lines(text, stop=stop)
             return True
         if act == "thinking":
             if r < 0.45:
@@ -726,7 +728,7 @@ class Bot:
             return True
         # between projects / starting up: look over the explorer and the code
         if r < 0.5:
-            human.move_to(*point_in(layout.explorer()), stop=stop)
+            human.move_to(*point_in(text), stop=stop)
         else:
             human.micro_drift(stop=stop)
         return True
@@ -1162,7 +1164,7 @@ class Bot:
                     return
             self.log(f"Finished project {project}")
             self.event("done", f"Finished {project}", f"{len(files)} files written")
-            if self.cfg.run_terminal and not self._run_commands(project, meta.get("steps")):
+            if self.cfg.terminal_after_project and not self._run_commands(project, meta.get("steps")):
                 return
             if not self._wait(random.uniform(25, 60) * self.cfg.think):
                 return

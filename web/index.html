@@ -718,7 +718,7 @@
           <div>
             <label class="f" style="margin-top:0">Workspace folder (projects get created here)</label>
             <input type="text" id="workspace_dir" placeholder="~/dev-projects">
-            <div class="checks" style="grid-template-columns:1fr"><label><input type="checkbox" id="run_terminal"> Open VS Code's terminal and build / test / run the project when it's finished</label></div>
+            <div class="checks" style="grid-template-columns:1fr"><label><input type="checkbox" id="terminal_after_project"> After writing a project, run it in VS Code's terminal (off = only type the code)</label></div>
             <label class="f">Stop a background command after (s)</label><input type="number" id="terminal_timeout" min="10" step="30">
             <div class="checks" style="grid-template-columns:1fr"><label><input type="checkbox" id="keep_finished"> Keep finished projects (off = only the current project)</label></div>
           </div>
@@ -977,7 +977,7 @@ function readForm() {
     detect_user: $("detect_user").checked,
     keep_finished: $("keep_finished").checked,
     background_typing: $("background_typing").checked,
-    run_terminal: $("run_terminal").checked,
+    terminal_after_project: $("terminal_after_project").checked,
     terminal_timeout: +$("terminal_timeout").value,
     mouse_resume: +$("mouse_resume").value,
     schedule_enabled: $("schedule_enabled").checked,
@@ -1009,7 +1009,7 @@ function fillForm(c) {
   for (const k of ["mouse_min", "mouse_max", "minutes", "clear_after_lines", "start_delay", "custom_file",
                    "editor", "source", "workspace_dir"]) $(k).value = c[k];
   for (const k of ["scroll", "breaks", "auto_open_editor", "keep_focus", "review_moves", "detect_user",
-                   "keep_finished", "maximize", "background_typing", "run_terminal"]) $(k).checked = !!c[k];
+                   "keep_finished", "maximize", "background_typing", "terminal_after_project"]) $(k).checked = !!c[k];
   $("terminal_timeout").value = c.terminal_timeout;
   $("mouse_resume").value = c.mouse_resume; $("serve_seconds").value = c.serve_seconds;
   $("schedule_enabled").checked = !!c.schedule_enabled; $("schedule_start").value = c.schedule_start; $("daily_hours").value = c.daily_hours;
