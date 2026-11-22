@@ -71,7 +71,13 @@ WORKSPACE_SETTINGS = {
     "files.autoSaveDelay": 1500,
     "workbench.editor.enablePreview": False,
     "workbench.startupEditor": "none",
-    "explorer.autoReveal": True,
+    "explorer.autoReveal": False,           # don't keep expanding folders in the explorer
+    "editor.stickyScroll.enabled": False,   # no lines pinned at the top of the editor
+    "editor.mouseWheelZoom": False,         # Ctrl + mouse wheel never changes the font size
+    "workbench.tips.enabled": False,
+    "workbench.secondarySideBar.defaultVisibility": "hidden",
+    "chat.commandCenter.enabled": False,
+    "workbench.editor.restoreViewState": True,
     "explorer.confirmDelete": False,
     "git.openRepositoryInParentFolders": "never",
     "extensions.ignoreRecommendations": True,
@@ -172,6 +178,8 @@ def place_window(rect, win_match=None, x_name=None, mac_process=None, mac_contai
             win = _WindowsFocus.find(win_match)
             if win is None:
                 return False
+            if win.isMaximized and x <= win.left + 20 < x + w and y <= win.top + 20 < y + h:
+                return True                 # already maximized on the right screen: leave it alone
             if win.isMaximized or win.isMinimized:
                 win.restore()
                 time.sleep(0.3)
@@ -354,6 +362,14 @@ class VSCodeEditor:
                 shutil.rmtree(path, ignore_errors=True)
         self._save_manifest([n for n in ours if n in keep and os.path.isdir(os.path.join(self.ws, n))])
 
+    def tidy(self):
+        """Just the code: normal zoom, no side bars, no panel (they can be opened by stray
+        shortcuts while you use the computer, or by extensions)."""
+        for command in ("View: Reset Zoom", "View: Close Secondary Side Bar", "View: Close Panel",
+                        "View: Close Primary Side Bar"):
+            self._palette(command, settle=0.5)
+            pyautogui.press("escape")       # close the palette if that command doesn't exist
+
     def begin_project(self, name, interactive=True):
         if interactive:
             self.focus(force=True)
@@ -361,6 +377,7 @@ class VSCodeEditor:
             pyautogui.hotkey(mod, "k")         # Close all editors (Ctrl+K Ctrl+W)
             pyautogui.hotkey(mod, "w")
             time.sleep(0.5)
+            self.tidy()
         ours = self._ours()
         keep = [n for n in ours if n != name] if self.keep_finished else []
         self.cleanup(keep=keep)            # workspace = just the project being written

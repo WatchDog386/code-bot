@@ -16,6 +16,25 @@ python -m pip install -r requirements.txt
   **Input Monitoring**. In VS Code run **"Shell Command: Install 'code' command in PATH"**.
 - Linux: X11 only; `sudo apt install python3-tk xdotool`.
 
+## Excel projects
+
+**Projects > Excel project** (or Settings > What to write > Excel projects) opens **Excel**
+(WPS Office or LibreOffice Calc if Excel isn't installed) instead of VS Code and types
+ready-made workbooks cell by cell - monthly budget, sales report, inventory valuation, payroll,
+class results, expense claims, project tracker - with real formulas (SUM, AVERAGE, IF, SUMIF,
+COUNTIF, INDEX/MATCH, RANK), makes the header row bold and saves each one.
+**Programming project** goes back to VS Code and the project library.
+
+## Keeping VS Code clean and the right size
+
+- At the start of every project the bot resets the zoom to 100 % and closes the side bars and
+  the bottom panel, so you only see the code. The explorer no longer expands folders by itself,
+  and Ctrl + mouse wheel can't change the font size.
+- It never types into another window: before every key it checks that VS Code is the window in
+  front, and that no Ctrl / Alt / Windows key is held down (which would turn letters into
+  shortcuts like zoom out). If either isn't so, it stops typing at once and keeps writing the
+  file in the background until VS Code is back.
+
 ## Install: desktop icon, start at sign-in, every day at 3 AM
 
 Run this once (Windows: just double-click **install_windows.bat**):

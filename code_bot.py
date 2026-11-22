@@ -30,9 +30,9 @@ except ImportError as exc:
 def main():
     p = argparse.ArgumentParser(description="Invotech 360: write real code nonstop with human-like typing and mouse.")
     p.add_argument("--editor", choices=["vscode", "notepad", "focused"], default="vscode")
-    p.add_argument("--source", choices=["mixed", "generated", "projects", "snippets", "file"], default=None,
-                   help="mixed = loop forever over new + library projects (default); "
-                        "generated = only new projects; projects = only the library")
+    p.add_argument("--source", choices=["projects", "spreadsheets", "mixed", "generated", "snippets", "file"], default=None,
+                   help="projects = the library, forever (default); spreadsheets = Excel projects; "
+                        "mixed = new + library; generated = only new projects")
     p.add_argument("--projects", nargs="+", choices=list_projects() or None, default=[],
                    help="which library projects to write (implies --source projects)")
     p.add_argument("--gen-languages", nargs="+", choices=["python", "go", "typescript"],
@@ -69,7 +69,7 @@ def main():
     bot.start_listeners()
 
     bot.start({
-        "editor": a.editor, "source": a.source or ("projects" if a.projects else "mixed"),
+        "editor": a.editor, "source": a.source or "projects",
         "projects": a.projects, "gen_languages": a.gen_languages,
         "workspace_dir": a.workspace, "custom_file": a.file, "languages": a.languages,
         "mode": a.mode, "wpm": a.wpm, "typo_rate": a.typo_rate,

@@ -49,13 +49,14 @@ CONTROL = ("if ", "for ", "while ", "switch", "try", "return", "else", "elif ", 
 SNIPPET_EXT = {"python": "py", "javascript": "js", "typescript": "ts", "sql": "sql",
                "go": "go", "java": "java"}
 DOUBLE_ESC_WINDOW = 0.6
+IS_WIN = sys.platform.startswith("win")
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")  # seconds between the two Esc presses
 
 
 @dataclass
 class Config:
     editor: str = "vscode"             # vscode | notepad | focused
-    source: str = "mixed"              # mixed | generated | projects | snippets | file
+    source: str = "projects"           # projects (the library) | spreadsheets (Excel) | mixed | generated | snippets | file
     gen_languages: list = field(default_factory=lambda: ["python", "go", "typescript"])
     projects: list = field(default_factory=list)   # empty = all
     workspace_dir: str = "~/dev-projects"
@@ -117,7 +118,7 @@ class Config:
             c.mode = "both"
         if c.editor not in ("vscode", "notepad", "focused"):
             c.editor = "vscode"
-        if c.source not in ("mixed", "generated", "projects", "snippets", "file"):
+        if c.source not in ("mixed", "generated", "spreadsheets", "projects", "snippets", "file"):
             c.source = "mixed"
         c.gen_languages = [l for l in c.gen_languages if l in GEN_LANGUAGES] or list(GEN_LANGUAGES)
         return c
@@ -271,6 +272,11 @@ class Bot:
 
     def make_editor(self, cfg=None):
         cfg = cfg or self.cfg
+        if cfg.source == "spreadsheets":            # Excel projects: Excel (or WPS) instead of VS Code
+            from .office import OfficeEditor
+            if not isinstance(self.editor, OfficeEditor):
+                self.editor = OfficeEditor(cfg.workspace_dir, log=self.log)
+            return self.editor
         if cfg.editor == "vscode":
             ws = os.path.abspath(os.path.expanduser(cfg.workspace_dir))
             if not (isinstance(self.editor, VSCodeEditor) and self.editor.ws == ws):
@@ -475,6 +481,7 @@ class Bot:
 
     def _lose_keys(self, why):
         """Stop sending keystrokes (they'd land wherever you are)."""
+        self._last_user = time.time()          # counts as you being busy: no instant take-back
         if not self._hands.is_set() or self.state not in ("running", "you"):
             return
         after = (f"takes it back after {self.cfg.resume_after:.0f}s idle" if self.cfg.resume_after
@@ -741,6 +748,12 @@ class Bot:
     def _jobs(self):
         """Yield (project, files, meta) forever. meta: scaffold files + terminal steps."""
         cfg = self.cfg
+        if cfg.source == "spreadsheets":
+            from .sheets import sheets_cycle
+            for p in sheets_cycle():
+                self.log(f"New Excel project: {p['title']}")
+                yield p["name"], p["files"], p
+            return
         if cfg.source in ("generated", "mixed"):
             # never ends: a new project, then (mixed) the next library project, and so on
             library = project_cycle(cfg.projects) if cfg.source == "mixed" and list_projects() else None
@@ -804,6 +817,33 @@ class Bot:
             d += random.uniform(0.2, 0.8) * self.cfg.think  # micro-hesitation
         return d
 
+    def _in_front(self):
+        """Is the bot's window the one that will receive the keys? If not: stop typing."""
+        if self.editor is None or self.editor.kind not in ("vscode", "office"):
+            return True
+        if self.editor.is_active() is False:
+            self._lose_keys("VS Code isn't the window in front")
+            return False
+        return self._modifiers_clear() or (self._lose_keys("A Ctrl/Alt/Win key is held down") or False)
+
+    def _modifiers_clear(self, wait=2.0):
+        """True when no Ctrl / Alt / Windows key is physically held (Windows; elsewhere
+        pynput's takeover detection covers it). Waits up to `wait` seconds for a release."""
+        if not IS_WIN:
+            return True
+        try:
+            import ctypes
+            state = ctypes.windll.user32.GetAsyncKeyState
+        except Exception:  # noqa: BLE001
+            return True
+        end = time.time() + wait
+        while True:
+            if not any(state(vk) & 0x8000 for vk in (0x11, 0x12, 0x5B, 0x5C)):   # Ctrl, Alt, LWin, RWin
+                return True
+            if time.time() > end:
+                return False
+            time.sleep(0.05)
+
     def _type_text(self, text, base, mirror=True):
         """Type with real keystrokes. Returns how many characters were typed (fewer if you
         took the keyboard mid-way), or None if the bot was stopped."""
@@ -818,6 +858,17 @@ class Bot:
             if not self._hands.is_set() or not self._check_click():
                 return i
             self._refocus_if_needed()  # you may have clicked elsewhere meanwhile
+            # a Ctrl / Alt / Win key held down (by you, anywhere) would turn the bot's letters
+            # into shortcuts (zoom out, open panels...): wait until it's released
+            if not self._modifiers_clear():
+                self._lose_keys("A Ctrl/Alt/Win key is held down")
+                return i
+            # never type into another window
+            every = 1 if IS_WIN else 40        # Windows: checked before every single key
+            if i % every == 0 and self.editor is not None and self.editor.kind in ("vscode", "office") \
+                    and self.editor.is_active() is False:
+                self._lose_keys("VS Code isn't the window in front")
+                return i
             ch = text[i]
             if cfg.typo_rate and i > 0 and ch.lower() in NEIGHBORS and random.random() < cfg.typo_rate:
                 wrong = random.choice(NEIGHBORS[ch.lower()])
@@ -912,6 +963,8 @@ class Bot:
         """Type `full` (indent + code + newline) from `pos` with keystrokes, exactly like a
         person: indent, the code with its typos and hesitations, Enter. Returns the new
         position (early if you took the keyboard), or None if stopped."""
+        if not self._in_front():
+            return pos
         while pos < indent:
             if not self._hands.is_set() or not self._check_click():
                 return pos
@@ -927,7 +980,7 @@ class Bot:
             pos += n
             if pos < body_end:
                 return pos
-        if pos < len(full) and self._hands.is_set():
+        if pos < len(full) and self._hands.is_set() and self._in_front():
             pyautogui.press("enter")
             self.live["text"] += "\n"
             pos += 1
@@ -1004,6 +1057,52 @@ class Bot:
                         pyautogui.hotkey("command" if sys.platform == "darwin" else "ctrl", "s")
         return True
 
+    # ----------------------------------------------------------- spreadsheets
+    def _type_sheet(self, rows):
+        """Type a table into Excel: a cell, Tab, the next cell... Enter at the end of a row
+        (Excel goes back to column A). Then the header row is made bold."""
+        base = 60.0 / (self.cfg.wpm * 5)
+        self.stats["lines_total"] = len(rows)
+        for idx, row in enumerate(rows):
+            if not self._gate_hands():
+                return False
+            self._energy = min(1.25, max(0.75, self._energy + random.uniform(-0.03, 0.03)))
+            pause = random.uniform(0.3, 1.6) * self.cfg.think if row else 0.3
+            self.activity = "thinking" if pause > 1.2 else "typing"
+            if not self._wait(pause):
+                return False
+            with self._act():
+                if not self._hands.is_set():
+                    continue
+                if self.editor.is_active() is False:
+                    self.editor.focus(force=True)
+                    time.sleep(0.4)
+                    if self.editor.is_active() is False:
+                        continue                         # Excel isn't in front: don't type anywhere
+                self.activity = "typing"
+                for c, cell in enumerate(row):
+                    if cell:
+                        if self._type_text(str(cell), base / self._energy) is None:
+                            return False
+                        if not cell.startswith("=") and not re.fullmatch(r"-?[\d.,]+", cell):
+                            pyautogui.press("delete")       # drop any AutoComplete suggestion
+                    if c < len(row) - 1:
+                        pyautogui.press("tab")
+                        self.live["text"] += "\t"
+                        time.sleep(base * random.uniform(0.8, 2.0))
+                pyautogui.press("enter")
+                self.live["text"] += "\n"
+            self.stats["lines"] += 1
+            self.stats["line"] = idx + 1
+        with self._act():
+            if self._hands.is_set() and self.editor.is_active() is not False:
+                pyautogui.hotkey("ctrl", "home")
+                pyautogui.hotkey("shift", "space")          # the header row
+                pyautogui.hotkey("ctrl", "b")
+                time.sleep(0.3)
+                pyautogui.hotkey("ctrl", "home")
+        return True
+
     def _type_loop(self):
         if self._job_iter is None:          # one rotation per run: survives recoveries
             self._job_iter = self._jobs()
@@ -1028,7 +1127,8 @@ class Bot:
                     return
                 self.stats.update(file=rel, file_index=i, line=0)
                 self.live.update(file=rel, text="")
-                self.event("create", f"Created {rel}", f"{content.count(chr(10)) + 1} lines")
+                self.event("create", f"Created {rel}", f"{len(content)} rows" if isinstance(content, list)
+                           else f"{content.count(chr(10)) + 1} lines")
                 self.log(f"Writing {project}/{rel}")
                 with self._act():
                     hands = self._hands.is_set()
@@ -1039,7 +1139,8 @@ class Bot:
                     if hands:
                         self._bg_ready = False
                     self._need_refocus = not hands
-                if not self._type_document(content):
+                done = self._type_sheet(content) if isinstance(content, list) else self._type_document(content)
+                if not done:
                     return
                 with self._act():
                     if self._hands.is_set():
