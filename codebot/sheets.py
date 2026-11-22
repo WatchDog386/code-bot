@@ -5,7 +5,12 @@ A project is {"name", "title", "kind": "sheet", "files": [(rel.xlsx, rows)], "st
 rows are lists of cell texts ("=SUM(B2:B9)" for formulas).
 """
 
+import csv
+import os
 import random
+import re
+import zipfile
+from xml.etree import ElementTree as ET
 
 FIRST = ["Amina", "Brian", "Cynthia", "David", "Esther", "Felix", "Grace", "Hassan", "Irene", "James", "Kevin",
          "Lucy", "Mercy", "Nelson", "Olive", "Peter", "Queen", "Rose", "Samuel", "Tabitha", "Victor", "Wanjiku"]
@@ -177,9 +182,93 @@ def generate(seed=None, count=None):
             "steps": [], "language": "spreadsheet", "records": titles}
 
 
+# ------------------------------------------------------------- your own workbooks
+UPLOADS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sheets")
+NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+MAX_ROWS, MAX_COLS = 3000, 80
+
+
+def uploaded():
+    """Workbooks you uploaded (Projects > Upload Excel), newest first."""
+    if not os.path.isdir(UPLOADS):
+        return []
+    files = [f for f in os.listdir(UPLOADS) if f.lower().endswith((".xlsx", ".csv")) and not f.startswith("~$")]
+    return sorted(files, key=lambda f: -os.path.getmtime(os.path.join(UPLOADS, f)))
+
+
+def _col_index(ref):
+    letters = re.match(r"[A-Z]+", ref).group(0)
+    n = 0
+    for ch in letters:
+        n = n * 26 + ord(ch) - 64
+    return n - 1, int(ref[len(letters):]) - 1
+
+
+def read_rows(path):
+    """Rows of cell texts from a .csv or the first sheet of an .xlsx (formulas as '=...')."""
+    if path.lower().endswith(".csv"):
+        with open(path, newline="", encoding="utf-8-sig", errors="replace") as fh:
+            return [row[:MAX_COLS] for row in csv.reader(fh)][:MAX_ROWS]
+    with zipfile.ZipFile(path) as z:
+        shared = []
+        if "xl/sharedStrings.xml" in z.namelist():
+            root = ET.fromstring(z.read("xl/sharedStrings.xml"))
+            for si in root.findall("m:si", NS):
+                shared.append("".join(t.text or "" for t in si.iter(f"{{{NS['m']}}}t")))
+        sheets = sorted(n for n in z.namelist() if re.match(r"xl/worksheets/sheet\d+\.xml$", n))
+        if not sheets:
+            return []
+        root = ET.fromstring(z.read(sheets[0]))
+    grid = {}
+    for c in root.iter(f"{{{NS['m']}}}c"):
+        ref = c.get("r")
+        if not ref:
+            continue
+        col, row = _col_index(ref)
+        if row >= MAX_ROWS or col >= MAX_COLS:
+            continue
+        f = c.find("m:f", NS)
+        v = c.find("m:v", NS)
+        if f is not None and f.text:
+            text = "=" + f.text
+        elif c.get("t") == "s" and v is not None:
+            text = shared[int(v.text)]
+        elif c.get("t") == "inlineStr":
+            text = "".join(t.text or "" for t in c.iter(f"{{{NS['m']}}}t"))
+        elif c.get("t") == "b" and v is not None:
+            text = "TRUE" if v.text == "1" else "FALSE"
+        else:
+            text = v.text if v is not None and v.text else ""
+        if text:
+            grid[(row, col)] = text
+    if not grid:
+        return []
+    rows = []
+    for r in range(max(k[0] for k in grid) + 1):
+        width = max([k[1] + 1 for k in grid if k[0] == r] or [0])
+        rows.append([grid.get((r, c), "") for c in range(width)])
+    return rows
+
+
+def uploaded_project(name):
+    rows = read_rows(os.path.join(UPLOADS, name))
+    stem = re.sub(r"[^a-z0-9]+", "-", os.path.splitext(name)[0].lower()).strip("-") or "workbook"
+    return {"name": f"{stem}-work", "title": os.path.splitext(name)[0], "kind": "sheet",
+            "files": [(f"{stem}.xlsx", rows)], "scaffold": [], "steps": [], "language": "spreadsheet",
+            "records": [name]}
+
+
 def sheets_cycle(seed=None):
+    """Forever: your uploaded workbooks first (each in turn), then a ready-made one, and round again."""
     rng = random.Random(seed)
     while True:
+        for name in uploaded():
+            try:
+                project = uploaded_project(name)
+            except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError):
+                continue
+            if project["files"][0][1]:
+                yield project
         yield generate(seed=rng.random())
 
 

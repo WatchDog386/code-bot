@@ -103,6 +103,23 @@ class Handler(BaseHTTPRequestHandler):
             if not data:
                 return self._send(503, {"error": "screen capture not available"})
             return self._send(200, data, "image/jpeg")
+        if url.path == "/api/sheets":
+            from codebot.sheets import uploaded
+            return self._send(200, {"uploads": uploaded(), "results": [
+                {"i": i, "name": r["name"], "project": r["project"], "t": r["t"], "size": len(r["data"])}
+                for i, r in enumerate(bot.results)]})
+        if url.path.startswith("/api/results/"):
+            try:
+                r = list(bot.results)[int(url.path.rsplit("/", 1)[1])]
+            except (ValueError, IndexError):
+                return self._send(404, {"error": "no such workbook"})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", f'attachment; filename="{r["name"]}"')
+            self.send_header("Content-Length", str(len(r["data"])))
+            self.end_headers()
+            self.wfile.write(r["data"])
+            return
         if url.path == "/api/project" and q.get("name") == bot.live["project"] and bot.current_files:
             return self._send(200, {"name": q["name"], "files": [
                 {"path": rel, "lines": text.count("\n") + 1, "bytes": len(text)}
@@ -167,7 +184,26 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin", "")
         if origin and not origin.startswith(("http://localhost", "http://127.0.0.1")):
             return self._send(403, {"error": "forbidden"})
+        if self.path.startswith("/api/sheets/upload"):
+            # your own workbook (.xlsx / .csv) to be typed into WPS Office
+            from codebot.sheets import UPLOADS
+            name = os.path.basename(parse_qs(urlparse(self.path).query).get("name", [""])[0])
+            length = int(self.headers.get("Content-Length") or 0)
+            if not name.lower().endswith((".xlsx", ".csv")) or not 0 < length <= 20_000_000:
+                return self._send(400, {"ok": False, "message": "Upload an .xlsx or .csv file (up to 20 MB)"})
+            os.makedirs(UPLOADS, exist_ok=True)
+            with open(os.path.join(UPLOADS, name), "wb") as fh:
+                fh.write(self.rfile.read(length))
+            return self._send(200, {"ok": True, "message": f"{name} added - it will be typed into WPS Office"})
         body = self._body()
+        if self.path == "/api/sheets/delete":
+            from codebot.sheets import UPLOADS
+            name = os.path.basename(body.get("name", ""))
+            try:
+                os.remove(os.path.join(UPLOADS, name))
+            except OSError:
+                pass
+            return self._send(200, {"ok": True})
         routes = {
             "/api/start": lambda: (save_settings(body), start_by_hand(body))[1],
             "/api/stop": lambda: bot.stop("user"),

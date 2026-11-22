@@ -16,14 +16,18 @@ python -m pip install -r requirements.txt
   **Input Monitoring**. In VS Code run **"Shell Command: Install 'code' command in PATH"**.
 - Linux: X11 only; `sudo apt install python3-tk xdotool`.
 
-## Excel projects
+## Programming and spreadsheets, nonstop
 
-**Projects > Excel project** (or Settings > What to write > Excel projects) opens **Excel**
-(WPS Office or LibreOffice Calc if Excel isn't installed) instead of VS Code and types
-ready-made workbooks cell by cell - monthly budget, sales report, inventory valuation, payroll,
-class results, expense claims, project tracker - with real formulas (SUM, AVERAGE, IF, SUMIF,
-COUNTIF, INDEX/MATCH, RANK), makes the header row bold and saves each one.
-**Programming project** goes back to VS Code and the project library.
+**Projects** page:
+- **Both, nonstop** (default) - a code project from the library typed in VS Code, then a spreadsheet
+  typed in **WPS Office** (Excel if WPS isn't installed), round and round, forever.
+- **Programming (VS Code)** - only the code library. **Spreadsheet (WPS Office)** - only spreadsheets.
+- **Upload Excel / CSV** - your own workbooks; the bot types them into WPS cell by cell (values and
+  formulas), then ready-made ones (budget, sales, inventory, payroll, results, expenses, tracker).
+  Finished workbooks can be **downloaded** from the same page (kept in memory, not on disk).
+
+Nothing piles up on your PC: each finished project's folder is removed (tick "Keep finished
+projects" to keep them), and there is no log file.
 
 ## Keeping VS Code clean and the right size
 

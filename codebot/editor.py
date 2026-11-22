@@ -153,9 +153,15 @@ def active_window_title():
     """Title of the window that has keyboard focus, or None if we can't tell."""
     try:
         if IS_WIN:
-            import pygetwindow as gw
-            w = gw.getActiveWindow()
-            return w.title if w is not None else ""
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            if not hwnd:
+                return None
+            length = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            return buf.value or None          # no title: can't tell, don't block typing
         if IS_MAC:
             script = ('tell application "System Events" to set p to first application process whose frontmost is true\n'
                       'tell application "System Events" to tell p\n'
@@ -421,6 +427,7 @@ class VSCodeEditor:
 
     def show_file(self, path):
         """Open (or switch to) the file's tab. VS Code shows what's on disk."""
+        self.current_file = path
         self._run_cli(path)
         time.sleep(1.6)
         self.focus(force=True)
@@ -440,13 +447,17 @@ class VSCodeEditor:
         return _norm(typed) == _norm(expected)
 
     def is_active(self):
-        """Is this VS Code window the one getting keystrokes? None = can't tell."""
+        """Is the bot's VS Code window the one getting keystrokes? None = can't tell
+        (then typing carries on). Only a clearly different window counts as False."""
         title = active_window_title()
-        if title is None:
+        if not title:
             return None
-        if IS_MAC:
-            return title.startswith("Code") and self.root_name in title
-        return "Visual Studio Code" in title and self.root_name in title
+        if self.root_name in title:
+            return True
+        current = os.path.basename(getattr(self, "current_file", "") or "")
+        if current and current in title and ("Visual Studio Code" in title or IS_MAC):
+            return True
+        return False
 
     def _palette(self, command, settle=1.0):
         """Run a VS Code command through the command palette, typed like a person."""

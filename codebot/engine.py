@@ -56,7 +56,7 @@ LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 @dataclass
 class Config:
     editor: str = "vscode"             # vscode | notepad | focused
-    source: str = "projects"           # projects (the library) | spreadsheets (Excel) | mixed | generated | snippets | file
+    source: str = "both"               # both (code + spreadsheets) | projects | spreadsheets | mixed | generated | snippets | file
     gen_languages: list = field(default_factory=lambda: ["python", "go", "typescript"])
     projects: list = field(default_factory=list)   # empty = all
     workspace_dir: str = "~/dev-projects"
@@ -118,8 +118,8 @@ class Config:
             c.mode = "both"
         if c.editor not in ("vscode", "notepad", "focused"):
             c.editor = "vscode"
-        if c.source not in ("mixed", "generated", "spreadsheets", "projects", "snippets", "file"):
-            c.source = "mixed"
+        if c.source not in ("both", "mixed", "generated", "spreadsheets", "projects", "snippets", "file"):
+            c.source = "both"
         c.gen_languages = [l for l in c.gen_languages if l in GEN_LANGUAGES] or list(GEN_LANGUAGES)
         return c
 
@@ -155,6 +155,7 @@ class Bot:
         self.stop_reason = ""               # why the last run ended
         self.started_by = ""                # "user" or "schedule"
         self._job_iter = None               # the never-ending project rotation
+        self.results = deque(maxlen=12)     # finished workbooks (in memory) for download
         self._need_caret = False            # the bot clicked in the code: caret back to the end
         # _hands set = the bot may send keystrokes (cleared when you type, or click into
         # another window); _mouse set = the bot may move the mouse (cleared while you move it)
@@ -175,16 +176,7 @@ class Bot:
         line = time.strftime("%H:%M:%S ") + str(msg)
         self.logs.append(line)
         print(line, flush=True)
-        # also to a file: when it starts by itself at login / 3 AM there's no window to read
-        try:
-            path = os.path.join(LOG_DIR, "invotech360.log")
-            os.makedirs(LOG_DIR, exist_ok=True)
-            if os.path.exists(path) and os.path.getsize(path) > 2_000_000:
-                os.replace(path, path + ".old")
-            with open(path, "a", encoding="utf-8") as fh:
-                fh.write(time.strftime("%Y-%m-%d ") + line + "\n")
-        except OSError:
-            pass
+        # (kept in memory only - nothing is written to your disk)
 
     def event(self, kind, title, detail=""):
         """A step for the dashboard's agent timeline (plan, create, write, verify, ...)."""
@@ -222,8 +214,9 @@ class Bot:
         return self.running and self.state == "you" and not self._hands.is_set()
 
     def _can_background(self):
-        return (self.cfg.background_typing and self.cfg.mode != "mouse" and self.editor is not None
-                and self.editor.kind == "vscode")
+        # always real, human typing: when you take the keyboard the bot simply waits and then
+        # carries on typing itself (no filling the file in behind your back)
+        return False
 
     def _gate_mouse(self):
         while self._gate() and not self._mouse.is_set():
@@ -512,7 +505,7 @@ class Bot:
         self._click_seen = self._clicked
         time.sleep(0.12)  # let the window manager switch focus
         active = self.editor.is_active() if self.editor and hasattr(self.editor, "is_active") else None
-        if active is False or (active is None and self.editor and self.editor.kind != "focused"):
+        if active is False:
             self._lose_keys("You clicked into another window")
             return False
         self._need_refocus = True
@@ -753,9 +746,21 @@ class Bot:
         if cfg.source == "spreadsheets":
             from .sheets import sheets_cycle
             for p in sheets_cycle():
-                self.log(f"New Excel project: {p['title']}")
+                self.log(f"New spreadsheet project: {p['title']}")
                 yield p["name"], p["files"], p
             return
+        if cfg.source == "both":
+            # forever: a code project from the library in VS Code, then a spreadsheet in WPS Office
+            from .sheets import sheets_cycle
+            sheets = sheets_cycle()
+            library = project_cycle(cfg.projects) if list_projects() else None
+            while True:
+                if library is not None:
+                    name, files = next(library)
+                    yield name, files, {"scaffold": project_scaffold(name, [r for r, _ in files])}
+                p = next(sheets)
+                self.log(f"New spreadsheet project: {p['title']}")
+                yield p["name"], p["files"], p
         if cfg.source in ("generated", "mixed"):
             # never ends: a new project, then (mixed) the next library project, and so on
             library = project_cycle(cfg.projects) if cfg.source == "mixed" and list_projects() else None
@@ -1105,12 +1110,48 @@ class Bot:
                 pyautogui.hotkey("ctrl", "home")
         return True
 
+    def _use_editor_for(self, meta):
+        """Spreadsheet projects go to WPS Office / Excel, code projects to VS Code."""
+        from .office import OfficeEditor
+        sheet = meta.get("kind") == "sheet"
+        if sheet and not isinstance(self.editor, OfficeEditor):
+            self._code_editor = self.editor
+            self.editor = getattr(self, "_office_editor", None) or OfficeEditor(self.cfg.workspace_dir, log=self.log)
+            self._office_editor = self.editor
+            self.editor.screen = self.monitor.work if self.monitor else None
+        elif not sheet and isinstance(self.editor, OfficeEditor) and getattr(self, "_code_editor", None):
+            self._office_editor = self.editor
+            self.editor = self._code_editor
+            with self._act():
+                self.editor.focus(force=True)
+
+    def _finish_project(self):
+        """Close the finished project and remove its folder (nothing is kept on your PC unless
+        'Keep finished projects' is ticked). Spreadsheets stay downloadable from the dashboard."""
+        ed = self.editor
+        if self.cfg.keep_finished or not getattr(ed, "project_dir", None):
+            return
+        with self._act():
+            if self._hands.is_set() and ed.is_active() is not False:
+                if ed.kind == "office":
+                    ed.close_file()
+                else:
+                    mod = "command" if sys.platform == "darwin" else "ctrl"
+                    pyautogui.hotkey(mod, "k")
+                    pyautogui.hotkey(mod, "w")
+                    time.sleep(0.5)
+        time.sleep(1.0)
+        shutil.rmtree(ed.project_dir, ignore_errors=True)
+        if hasattr(ed, "_save_manifest") and hasattr(ed, "_manifest"):
+            ed._save_manifest([n for n in ed._manifest() if n != os.path.basename(ed.project_dir)])
+
     def _type_loop(self):
         if self._job_iter is None:          # one rotation per run: survives recoveries
             self._job_iter = self._jobs()
         for project, files, meta in self._job_iter:
             if not self._gate():
                 return
+            self._use_editor_for(meta)
             with self._act():
                 hands = self._hands.is_set()
                 if self.cfg.maximize and self.monitor and hands:
@@ -1152,6 +1193,13 @@ class Bot:
                         ok = self.editor.verify(path, content) if hasattr(self.editor, "verify") else None
                 self.stats["files"] += 1
                 self.live["done"].append(rel)
+                if self.editor.kind == "office" and path and os.path.exists(path):
+                    try:
+                        with open(path, "rb") as fh:
+                            self.results.append({"name": os.path.basename(path), "project": project,
+                                                 "t": time.time(), "data": fh.read()})
+                    except OSError:
+                        pass
                 if ok is True:
                     self.stats["verified"] += 1
                     self.event("verify", f"Verified {rel}", "saved file matches the source")
@@ -1164,8 +1212,10 @@ class Bot:
                     return
             self.log(f"Finished project {project}")
             self.event("done", f"Finished {project}", f"{len(files)} files written")
-            if self.cfg.terminal_after_project and not self._run_commands(project, meta.get("steps")):
+            if self.cfg.terminal_after_project and self.editor.kind == "vscode" \
+                    and not self._run_commands(project, meta.get("steps")):
                 return
+            self._finish_project()
             if not self._wait(random.uniform(25, 60) * self.cfg.think):
                 return
 

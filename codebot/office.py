@@ -70,14 +70,9 @@ def blank_xlsx(path, sheet="Sheet1"):
 
 # -------------------------------------------------------------------- office apps
 def find_office():
-    """(name, command list) of the spreadsheet app to use: Excel first, then WPS."""
+    """(name, command list) of the spreadsheet app to use: WPS Office first, then Excel."""
     if IS_WIN:
         roots = [os.environ.get(v, "") for v in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)")]
-        for root in filter(None, roots[1:]):
-            for pattern in ("Microsoft Office/root/Office*/EXCEL.EXE", "Microsoft Office/Office*/EXCEL.EXE"):
-                hits = sorted(glob.glob(os.path.join(root, *pattern.split("/"))), reverse=True)
-                if hits:
-                    return "Excel", [hits[0]]
         for root in filter(None, roots):
             for pattern in ("Kingsoft/WPS Office/*/office6/et.exe", "Kingsoft/WPS Office/ksolaunch.exe",
                             "WPS Office/*/office6/et.exe", "Kingsoft/WPS Office/*/office6/wps.exe"):
@@ -85,13 +80,18 @@ def find_office():
                 if hits:
                     return "WPS Spreadsheets", [hits[0]]
         for root in filter(None, roots[1:]):
+            for pattern in ("Microsoft Office/root/Office*/EXCEL.EXE", "Microsoft Office/Office*/EXCEL.EXE"):
+                hits = sorted(glob.glob(os.path.join(root, *pattern.split("/"))), reverse=True)
+                if hits:
+                    return "Excel", [hits[0]]
+        for root in filter(None, roots[1:]):
             for pattern in ("LibreOffice/program/scalc.exe",):
                 hits = glob.glob(os.path.join(root, *pattern.split("/")))
                 if hits:
                     return "LibreOffice Calc", [hits[0]]
         return "default spreadsheet app", None        # let Windows pick (os.startfile)
     if IS_MAC:
-        for app, name in (("/Applications/Microsoft Excel.app", "Excel"), ("/Applications/wpsoffice.app", "WPS Office"),
+        for app, name in (("/Applications/wpsoffice.app", "WPS Office"), ("/Applications/Microsoft Excel.app", "Excel"),
                           ("/Applications/LibreOffice.app", "LibreOffice Calc")):
             if os.path.exists(app):
                 return name, ["open", "-a", app]
@@ -211,6 +211,12 @@ class OfficeEditor:
         pyautogui.press("enter")          # "keep this format?" prompts: keep the default
         time.sleep(0.5)
         return None
+
+    def close_file(self):
+        """Close the finished workbook (it was saved) so its folder can be removed."""
+        if self.is_active() is not False:
+            pyautogui.hotkey("ctrl", "w")
+            time.sleep(1.0)
 
     def clear(self):
         pass
