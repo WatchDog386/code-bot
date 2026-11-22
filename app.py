@@ -50,60 +50,6 @@ from codebot.schedule import Scheduler  # noqa: E402
 scheduler = Scheduler(bot, lambda: load_settings(), os.path.join(HERE, "usage.json"))
 
 
-def public(cfg_dict):
-    """Settings for the page: the API key is never sent, only whether one is saved."""
-    d = dict(cfg_dict)
-    d["ai_key_set"] = bool(d.get("ai_api_key"))
-    d["ai_api_key"] = "••••••••" if d.get("ai_api_key") else ""
-    return d
-
-
-def full_status():
-    st = bot.status()
-    st["config"] = public(st.get("config", {}))
-    st["schedule"] = scheduler.status()
-    st["agent"] = {"busy": bot._job is not None, "status": bot.agent_status, "usage": bot.agent_usage}
-    return st
-
-
-CHAT_SYSTEM = """You are Invotech 360's assistant inside a coding workspace (like Cursor / Windsurf chat).
-Answer clearly and concisely in Markdown. Use fenced code blocks with a language for code.
-When the user asks you to build, change or run something on their computer, tell them to switch to
-Agent mode (or offer the exact task text to give the agent)."""
-
-
-def chat_reply(body):
-    """One chat turn: the conversation plus context (the open file, @mentioned files)."""
-    from codebot.llm import LLM
-    cfg = load_settings()
-    llm = LLM.from_config(cfg)
-    context = []
-    live = bot.live
-    if live.get("project"):
-        context.append(f"Project: {live['project']}; files: {', '.join(live.get('files', [])[:60])}")
-    for rel in body.get("files", [])[:6]:
-        text = bot.current_files.get(rel)
-        if text is None and live.get("project"):
-            path = os.path.join(os.path.expanduser(cfg.workspace_dir), live["project"], *rel.split("/"))
-            try:
-                with open(path, encoding="utf-8") as fh:
-                    text = fh.read()
-            except OSError:
-                text = None
-        if text is not None:
-            context.append(f"File {rel}:\n```\n{text[:12000]}\n```")
-    if body.get("include_open") and live.get("file") and live.get("text"):
-        context.append(f"Open file {live['file']}:\n```\n{live['text'][-12000:]}\n```")
-    messages = [{"role": "system", "content": CHAT_SYSTEM + ("\n\nContext:\n" + "\n\n".join(context) if context else "")}]
-    for m in body.get("messages", [])[-20:]:
-        if m.get("role") in ("user", "assistant") and m.get("content"):
-            messages.append({"role": m["role"], "content": str(m["content"])[:20000]})
-    msg = llm.chat(messages, temperature=0.4, model=body.get("model") or cfg.ai_model)
-    import re as _re
-    text = _re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=_re.S).strip()
-    return {"reply": text, "usage": llm.usage}
-
-
 def start_by_hand(body):
     ok, msg = scheduler.allow_start()
     if not ok:
@@ -114,9 +60,6 @@ def start_by_hand(body):
 
 def save_settings(cfg_dict):
     from dataclasses import asdict
-    cfg_dict = dict(cfg_dict or {})
-    if not cfg_dict.get("ai_api_key") or set(str(cfg_dict.get("ai_api_key"))) == {"•"}:
-        cfg_dict["ai_api_key"] = load_settings().ai_api_key      # the page never sees the key itself
     try:
         with open(SETTINGS, "w", encoding="utf-8") as fh:
             json.dump(asdict(Config.from_dict(cfg_dict)), fh, indent=2)
@@ -185,7 +128,9 @@ class Handler(BaseHTTPRequestHandler):
             with open(INDEX, "rb") as fh:
                 return self._send(200, fh.read(), "text/html; charset=utf-8")
         if self.path == "/api/status":
-            return self._send(200, full_status())
+            st = bot.status()
+            st["schedule"] = scheduler.status()
+            return self._send(200, st)
         if self.path == "/manifest.webmanifest":
             return self._send(200, {
                 "id": "/", "name": "Invotech 360", "short_name": "Invotech 360",
@@ -211,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, fh.read(), "image/png")
         if self.path == "/api/settings":
             from dataclasses import asdict
-            return self._send(200, {"config": public(asdict(load_settings())), "languages": LANGUAGES,
+            return self._send(200, {"config": asdict(load_settings()), "languages": LANGUAGES,
                                     "generator": {"languages": list(GEN_LANGUAGES),
                                                   "domains": {k: v[0] for k, v in GEN_DOMAINS.items()}},
                                     "projects": list_projects(), "monitors": monitors_info()})
@@ -223,26 +168,6 @@ class Handler(BaseHTTPRequestHandler):
         if origin and not origin.startswith(("http://localhost", "http://127.0.0.1")):
             return self._send(403, {"error": "forbidden"})
         body = self._body()
-        if self.path in ("/api/chat", "/api/ai/test"):
-            from codebot.llm import LLM, LLMError
-            try:
-                if self.path == "/api/chat":
-                    return self._send(200, {"ok": True, **chat_reply(body)})
-                if body.get("ai_api_key"):
-                    save_settings(body)
-                llm = LLM.from_config(load_settings())
-                models = llm.models()
-                return self._send(200, {"ok": True, "models": models,
-                                        "message": f"Connected - {len(models)} models available"})
-            except LLMError as exc:
-                return self._send(200, {"ok": False, "message": str(exc)})
-        if self.path == "/api/agent":
-            save_settings({**{k: v for k, v in body.items() if k not in ("task", "folder")}} or {})
-            ok, msg = scheduler.allow_start()
-            if ok:
-                from dataclasses import asdict as _asdict
-                ok, msg = bot.start_agent(body.get("task", "").strip(), _asdict(load_settings()), body.get("folder", ""))
-            return self._send(200, {"ok": bool(ok), "message": msg, "status": full_status()})
         routes = {
             "/api/start": lambda: (save_settings(body), start_by_hand(body))[1],
             "/api/stop": lambda: bot.stop("user"),
@@ -256,7 +181,9 @@ class Handler(BaseHTTPRequestHandler):
         if not fn:
             return self._send(404, {"error": "not found"})
         ok, msg = fn()
-        self._send(200, {"ok": bool(ok), "message": msg, "status": full_status()})
+        st = bot.status()
+        st["schedule"] = scheduler.status()
+        self._send(200, {"ok": bool(ok), "message": msg, "status": st})
 
 
 def open_dashboard(url):

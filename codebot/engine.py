@@ -84,11 +84,6 @@ class Config:
     auto_open_editor: bool = True
     keep_focus: bool = True
     minutes: float = 0
-    ai_api_key: str = ""               # Groq (or any OpenAI-compatible) API key - stays on this PC
-    ai_base_url: str = "https://api.groq.com/openai/v1"
-    ai_model: str = "llama-3.3-70b-versatile"
-    agent_typing: str = "type"         # type = the agent types its files in VS Code; instant = writes them
-    agent_wpm: int = 220               # how fast the agent types
     schedule_enabled: bool = True      # start by itself every day at schedule_start
     schedule_start: str = "03:00"      # HH:MM, this computer's local time
     daily_hours: float = 10.0          # most hours it may run per day (0 = no limit)
@@ -122,10 +117,7 @@ class Config:
             c.mode = "both"
         if c.editor not in ("vscode", "notepad", "focused"):
             c.editor = "vscode"
-        c.agent_wpm = max(30, min(1000, int(c.agent_wpm)))
-        if c.agent_typing not in ("type", "instant"):
-            c.agent_typing = "type"
-        if c.source not in ("mixed", "generated", "spreadsheets", "projects", "snippets", "file"):
+        if c.source not in ("mixed", "generated", "projects", "snippets", "file"):
             c.source = "mixed"
         c.gen_languages = [l for l in c.gen_languages if l in GEN_LANGUAGES] or list(GEN_LANGUAGES)
         return c
@@ -162,9 +154,6 @@ class Bot:
         self.stop_reason = ""               # why the last run ended
         self.started_by = ""                # "user" or "schedule"
         self._job_iter = None               # the never-ending project rotation
-        self._job = None                    # ("agent", task, folder) while the AI agent works
-        self.agent_status = ""
-        self.agent_usage = {}
         self._need_caret = False            # the bot clicked in the code: caret back to the end
         # _hands set = the bot may send keystrokes (cleared when you type, or click into
         # another window); _mouse set = the bot may move the mouse (cleared while you move it)
@@ -282,11 +271,6 @@ class Bot:
 
     def make_editor(self, cfg=None):
         cfg = cfg or self.cfg
-        if cfg.source == "spreadsheets" and self._job is None:
-            from .office import OfficeEditor
-            if not isinstance(self.editor, OfficeEditor):
-                self.editor = OfficeEditor(cfg.workspace_dir, log=self.log)
-            return self.editor
         if cfg.editor == "vscode":
             ws = os.path.abspath(os.path.expanduser(cfg.workspace_dir))
             if not (isinstance(self.editor, VSCodeEditor) and self.editor.ws == ws):
@@ -582,8 +566,7 @@ class Bot:
             if cfg.mode in ("both", "mouse"):
                 workers.append(threading.Thread(target=self._safe, args=(self._mouse_loop,), daemon=True))
             if cfg.mode in ("both", "type"):
-                target = self._agent_loop if self._job else self._type_loop
-                workers.append(threading.Thread(target=self._safe, args=(target,), daemon=True))
+                workers.append(threading.Thread(target=self._safe, args=(self._type_loop,), daemon=True))
             if cfg.breaks:
                 workers.append(threading.Thread(target=self._safe, args=(self._break_loop,), daemon=True))
             self._threads.extend(workers)
@@ -601,7 +584,6 @@ class Bot:
             for w in workers:
                 w.join(timeout=3)
         finally:
-            self._job = None
             self.state = "stopped"
             self.activity = ""
             self.log("Stopped")
@@ -759,12 +741,6 @@ class Bot:
     def _jobs(self):
         """Yield (project, files, meta) forever. meta: scaffold files + terminal steps."""
         cfg = self.cfg
-        if cfg.source == "spreadsheets":
-            from .sheets import sheets_cycle
-            for p in sheets_cycle():
-                self.log(f"New spreadsheet project: {p['title']}")
-                yield p["name"], p["files"], p
-            return
         if cfg.source in ("generated", "mixed"):
             # never ends: a new project, then (mixed) the next library project, and so on
             library = project_cycle(cfg.projects) if cfg.source == "mixed" and list_projects() else None
@@ -1028,104 +1004,6 @@ class Bot:
                         pyautogui.hotkey("command" if sys.platform == "darwin" else "ctrl", "s")
         return True
 
-    # ----------------------------------------------------------- spreadsheets
-    def _type_sheet(self, rows):
-        """Type a table into the spreadsheet app: a cell, Tab, the next cell... Enter at the
-        end of a row (back to column A). Then the header row is made bold and it's saved."""
-        base = 60.0 / (self.cfg.wpm * 5)
-        self.stats["lines_total"] = len(rows)
-        for idx, row in enumerate(rows):
-            if not self._gate_hands():
-                return False
-            self._energy = min(1.25, max(0.75, self._energy + random.uniform(-0.03, 0.03)))
-            pause = random.uniform(0.3, 1.6) * self.cfg.think if row else 0.3
-            self.activity = "thinking" if pause > 1.2 else "typing"
-            if not self._wait(pause):
-                return False
-            with self._act():
-                if not self._hands.is_set():
-                    continue
-                if self.editor.is_active() is False:
-                    self.editor.focus(force=True)
-                    time.sleep(0.4)
-                self.activity = "typing"
-                for c, cell in enumerate(row):
-                    if cell:
-                        if self._type_text(str(cell), base / self._energy) is None:
-                            return False
-                        if not cell.startswith("=") and not re.fullmatch(r"-?[\d.,]+", cell):
-                            pyautogui.press("delete")       # drop any AutoComplete suggestion
-                    if c < len(row) - 1:
-                        pyautogui.press("tab")
-                        self.live["text"] += "\t"
-                        time.sleep(base * random.uniform(0.8, 2.0))
-                pyautogui.press("enter")
-                self.live["text"] += "\n"
-            self.stats["lines"] += 1
-            self.stats["line"] = idx + 1
-        with self._act():
-            if self._hands.is_set():
-                pyautogui.hotkey("ctrl", "home")
-                pyautogui.hotkey("shift", "space")          # the header row
-                pyautogui.hotkey("ctrl", "b")
-                time.sleep(0.3)
-                pyautogui.hotkey("ctrl", "home")
-        return True
-
-    # ------------------------------------------------------------ AI agent
-    def start_agent(self, task, cfg_dict=None, folder=""):
-        """Stop the autopilot if it's running and let the AI agent do `task` in VS Code."""
-        if self.running:
-            self.stop("agent")
-            for t in self._threads:
-                t.join(timeout=15)
-        cfg = Config.from_dict(cfg_dict or asdict(self.cfg))
-        if not cfg.ai_api_key:
-            return False, "Add your Groq API key in Settings > AI first"
-        cfg.editor = "vscode"
-        self._job = ("agent", task, folder)
-        ok, msg = self.start(asdict(cfg))
-        if not ok:
-            self._job = None
-        return ok, msg
-
-    def _agent_emit(self, kind, title, detail=""):
-        self.event(kind, title, detail)
-        if kind in ("say", "done", "warn"):
-            self.log(f"Agent: {title}: {detail[:300]}")
-
-    def _agent_loop(self):
-        from .agent import Agent
-        from .agent_actions import VSCodeActions
-        from .llm import LLM
-        _, task, folder = self._job
-        cfg = self.cfg
-        name = folder or (re.sub(r"[^a-z0-9]+", "-", task.lower()).strip("-")[:40] or "agent-task")
-        with self._act():
-            self.editor.keep_finished = True           # the agent never deletes other projects
-            existing = os.path.join(self.editor.ws, folder) if folder else ""
-            if existing and os.path.isdir(existing):
-                self.editor.project_dir = existing
-            else:
-                self.editor.begin_project(name, interactive=self._hands.is_set())
-        project = os.path.basename(self.editor.project_dir)
-        self.live.update(project=project, files=[], done=[], file="", text="")
-        self.current_files = {}
-        self.stats.update(project=project, files_total=0, file_index=0)
-        actions = VSCodeActions(self)
-        llm = LLM.from_config(cfg)
-        agent = Agent(llm, actions, self._agent_emit, model=cfg.ai_model)
-        try:
-            outcome = agent.run(task, actions.context())
-        finally:
-            actions.cleanup()
-            self.agent_usage = dict(llm.usage)
-        self.log(f"Agent {outcome}: {agent.summary[:200]}")
-        self.stop_reason = "agent"
-        self._job = None
-        self._stop.set()
-        self._run.set()
-
     def _type_loop(self):
         if self._job_iter is None:          # one rotation per run: survives recoveries
             self._job_iter = self._jobs()
@@ -1150,8 +1028,7 @@ class Bot:
                     return
                 self.stats.update(file=rel, file_index=i, line=0)
                 self.live.update(file=rel, text="")
-                self.event("create", f"Created {rel}", f"{len(content)} rows" if isinstance(content, list)
-                           else f"{content.count(chr(10)) + 1} lines")
+                self.event("create", f"Created {rel}", f"{content.count(chr(10)) + 1} lines")
                 self.log(f"Writing {project}/{rel}")
                 with self._act():
                     hands = self._hands.is_set()
@@ -1162,8 +1039,7 @@ class Bot:
                     if hands:
                         self._bg_ready = False
                     self._need_refocus = not hands
-                done = self._type_sheet(content) if isinstance(content, list) else self._type_document(content)
-                if not done:
+                if not self._type_document(content):
                     return
                 with self._act():
                     if self._hands.is_set():

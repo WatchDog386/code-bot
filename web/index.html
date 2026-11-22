@@ -7,6 +7,9 @@
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0E2135">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script>
   // theme before first paint (no flash)
   try { const t = localStorage.getItem("codebot.theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
@@ -29,9 +32,8 @@
     --tk-kw: #8A2BE2; --tk-str: #1F7A3A; --tk-com: #8A9690; --tk-num: #B4530A; --tk-fn: #1A5FB4;
     --tk-type: #0E7C86; --tk-dec: #B4530A; --tk-punc: #5E6B65;
     --shadow: 0 12px 40px rgba(14,33,53,.18);
-    /* the same type as Windsurf / VS Code: Segoe UI 13px for the interface, Consolas 14px for code */
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, "Ubuntu", "Droid Sans", sans-serif;
-    --mono: Consolas, "Courier New", Menlo, Monaco, "Droid Sans Mono", monospace;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -61,7 +63,7 @@
 
   * { box-sizing: border-box; }
   html, body { height: 100%; }
-  body { margin: 0; background: var(--page); color: var(--ink); font: 13px/1.4 var(--sans);
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 var(--sans);
          -webkit-font-smoothing: antialiased; overflow: hidden; }
   button, input, select, textarea { font: inherit; color: inherit; }
   svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2;
@@ -244,7 +246,7 @@
   .tabtools .icon-btn.on { color: var(--green); background: var(--green-soft); }
   .crumbs { display: flex; align-items: center; gap: 4px; height: 26px; padding: 0 14px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--row); flex: none; overflow: hidden; white-space: nowrap; }
   .crumbs svg { width: 12px; height: 12px; }
-  .code { flex: 1; overflow: auto; font: 14px/19px var(--mono); padding: 8px 0 40vh; tab-size: 4; }
+  .code { flex: 1; overflow: auto; font: 13px/20px var(--mono); padding: 8px 0 40vh; tab-size: 4; }
   .ln { display: flex; min-width: max-content; }
   .ln .n { position: sticky; left: 0; width: 56px; flex: none; text-align: right; padding-right: 18px; color: var(--ed-num); background: var(--ed-bg); user-select: none; }
   .ln .c { white-space: pre; padding-right: 30px; }
@@ -328,42 +330,6 @@
   .composer .send.stop svg { fill: currentColor; }
   .hint { padding: 0 16px 12px; margin-top: -6px; font-size: 11.5px; color: var(--dim); }
 
-  .steps > * { flex-shrink: 0; }
-  #qMode { display: none; }
-  .modes { display: flex; background: var(--mini); border-radius: 6px; padding: 2px; gap: 2px; }
-  .modes button { border: 0; background: none; padding: 4px 12px; border-radius: 4px; font: 600 12px var(--sans); color: var(--muted); cursor: pointer; }
-  .modes button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
-  .usage { font-size: 11px; color: var(--dim); white-space: nowrap; }
-  .bubble { padding: 4px 4px 10px; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
-  .bubble .who { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  .bubble .who .si { width: 18px; height: 18px; border-radius: 4px; background: var(--nav); display: grid; place-items: center; }
-  .bubble .who .si svg { width: 11px; height: 11px; stroke: #fff; }
-  .bubble.user { background: var(--mini); border-radius: 8px; padding: 8px 12px; margin: 10px 0 6px; white-space: pre-wrap; }
-  .md p { margin: 0 0 8px; } .md p:last-child { margin-bottom: 0; }
-  .md h1, .md h2, .md h3 { font-size: 14px; margin: 10px 0 6px; }
-  .md ul, .md ol { margin: 4px 0 8px; padding-left: 20px; }
-  .md code { font: 12px var(--mono); background: var(--mini); padding: 1px 4px; border-radius: 3px; }
-  .md a { color: var(--green); }
-  .cblock { border: 1px solid var(--border); border-radius: 6px; margin: 8px 0; overflow: hidden; background: var(--ed-bg); }
-  .cblock .cbh { display: flex; align-items: center; justify-content: space-between; padding: 3px 10px; background: var(--mini); font-size: 11.5px; color: var(--muted); }
-  .cblock .cbh button { border: 0; background: none; color: var(--muted); cursor: pointer; font: 11.5px var(--sans); }
-  .cblock .cbh button:hover { color: var(--ink); }
-  .cblock pre { margin: 0; padding: 8px 10px; overflow: auto; font: 13px/18px var(--mono); max-height: 360px; }
-  .tcard { border: 1px solid var(--border); border-radius: 6px; margin: 6px 0; overflow: hidden; }
-  .tcard .th { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12.5px; }
-  .tcard .th svg { width: 13px; height: 13px; color: var(--muted); }
-  .tcard .th b { font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
-  .tcard .tr { border-top: 1px solid var(--row); padding: 5px 10px; font: 11.5px/1.5 var(--mono); color: var(--muted); white-space: pre-wrap; max-height: 110px; overflow: auto; }
-  .tcard.done { border-color: var(--green); background: var(--green-soft); }
-  .ctxbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px 0; }
-  .chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 11px; border: 1px solid var(--border); font-size: 11.5px; color: var(--muted); cursor: pointer; background: var(--panel); user-select: none; }
-  .chip svg { width: 11px; height: 11px; }
-  .chip.on { border-color: var(--green); color: var(--green); background: var(--green-soft); }
-  .quick { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 8px; }
-  .mention { position: absolute; left: 14px; right: 14px; bottom: 100%; margin-bottom: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: var(--shadow); max-height: 220px; overflow: auto; z-index: 5; }
-  .mention div { padding: 6px 10px; font: 12px var(--mono); cursor: pointer; }
-  .mention div.on, .mention div:hover { background: var(--green-soft); }
-  .composer { position: relative; }
   .statusbar { height: 24px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px; font-size: 12px; color: #fff; background: var(--nav); transition: background .3s; }
   .statusbar.running { background: var(--green); }
   .statusbar.you { background: var(--blue); }
@@ -529,10 +495,7 @@
 
         <aside class="agent">
           <div class="agent-head">
-            <div class="modes" role="tablist"><button data-amode="agent">Agent</button><button data-amode="chat">Chat</button></div>
-            <span class="spacer"></span>
-            <span class="usage" id="tokUse"></span>
-            <button class="icon-btn" id="newChat" title="New conversation" data-i="msg" style="width:28px;height:28px"></button>
+            <h2><span data-i="sparkle"></span>Agent</h2>
             <button class="btn sm" id="pause"><span data-i="pause"></span>Pause</button>
           </div>
           <div class="runcard" id="runcard">
@@ -542,13 +505,9 @@
             <div class="sub"><span id="p_files"></span><span id="p_verify"></span></div>
           </div>
           <div class="steps" id="steps"></div>
-          <div class="quick" id="quick"></div>
           <div class="composer">
-            <div class="mention hidden" id="mention"></div>
-            <div class="ctxbar" id="ctxbar"></div>
-            <textarea id="ask" rows="2" placeholder="Ask anything or give the agent a task… @ to add a file"></textarea>
+            <textarea id="ask" rows="2" placeholder="Tell the agent what to do… e.g. “new project in go” or “write fleet-api at 60 wpm”"></textarea>
             <div class="ctl">
-              <select id="qModel" title="AI model"></select>
               <select id="qProject" title="Project"></select>
               <select id="qMode" title="Mode">
                 <option value="both">Mouse + typing</option><option value="type">Typing only</option><option value="mouse">Mouse only</option>
@@ -556,7 +515,7 @@
               <button class="send" id="send" title="Send (Enter)"><span data-i="send"></span></button>
             </div>
           </div>
-          <div class="hint" id="hint">Enter to send · Shift+Enter new line · @ file · <code>help</code> for bot commands</div>
+          <div class="hint">Enter to send · Shift+Enter new line · type <code>help</code> for commands</div>
         </aside>
       </div>
     </section>
@@ -604,9 +563,7 @@
     <!-- ==================================================== PROJECTS -->
     <section class="page hidden" data-page="projects">
       <div class="panel" style="margin-bottom:20px">
-        <div class="panel-head"><h2>Start a project</h2>
-          <button class="btn" id="sheetStart"><span data-i="chart"></span>Spreadsheet project (WPS Office)</button>
-          <button class="btn primary" id="genStart"><span data-i="code"></span>Programming project (VS Code)</button></div>
+        <div class="panel-head"><h2>New project every time</h2><button class="btn primary" id="genStart"><span data-i="sparkle"></span>Write a new project</button></div>
         <p class="muted" style="margin:0">The bot comes up with a fresh, complete project for each run: a different kind of business app in Python, Go or TypeScript, with models, storage, business rules, an API or query layer and a full test suite. Every file it types is over 1000 lines; then it builds, tests and runs the project in VS Code's terminal.</p>
         <div class="chips" id="genDomains" style="gap:6px"></div>
       </div>
@@ -642,7 +599,6 @@
         <button data-tab="t-source">What to write</button>
         <button data-tab="t-screen">Screen &amp; workspace</button>
         <button data-tab="t-schedule">Schedule</button>
-        <button data-tab="t-ai">AI</button>
       </div>
       <div class="cols c2" style="margin-top:0" id="t-behavior">
         <div class="panel">
@@ -706,7 +662,6 @@
                 <select id="source">
                   <option value="mixed">Loop forever: new projects + library projects</option>
                   <option value="generated">New project every time (1000+ lines per file)</option>
-                  <option value="spreadsheets">Spreadsheet projects in WPS Office / Excel</option>
                   <option value="projects">Projects library</option>
                   <option value="snippets">Short snippets</option>
                   <option value="file">My own file</option>
@@ -721,35 +676,6 @@
               <div><label class="f">Start delay (seconds)</label><input type="number" id="start_delay" min="0" step="1"></div>
               <div><label class="f">Notepad: clear every N lines</label><input type="number" id="clear_after_lines" min="0" step="10"></div>
             </div>
-          </div>
-        </div>
-      </div>
-      <div class="cols c2 hidden" style="margin-top:0" id="t-ai">
-        <div class="panel">
-          <div class="panel-head"><h2>AI model (Groq)</h2><span class="pill" id="aiState">not set</span></div>
-          <div>
-            <label class="f" style="margin-top:0">API key (stays on this computer)</label>
-            <input type="password" id="ai_api_key" placeholder="gsk_..." autocomplete="off">
-            <div class="row2">
-              <div><label class="f">Model</label><input type="text" id="ai_model" list="modelList"><datalist id="modelList"></datalist></div>
-              <div><label class="f">API address</label><input type="text" id="ai_base_url"></div>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;margin-top:14px">
-              <button class="btn primary" id="aiTest"><span data-i="zap"></span>Save &amp; test</button>
-              <span class="muted" id="aiMsg"></span>
-            </div>
-            <p class="muted" style="margin:14px 0 0">Get a free key at console.groq.com &gt; API Keys. Any OpenAI-compatible service works too (change the address).</p>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><h2>How the agent works in VS Code</h2></div>
-          <div>
-            <div class="row2">
-              <div><label class="f" style="margin-top:0">Files</label>
-                <select id="agent_typing"><option value="type">Typed in VS Code (you see it written)</option><option value="instant">Written instantly</option></select></div>
-              <div><label class="f" style="margin-top:0">Agent typing speed (WPM)</label><input type="number" id="agent_wpm" min="30" max="1000" step="10"></div>
-            </div>
-            <p class="muted" style="margin:14px 0 0">In <b>Agent</b> mode the AI plans the task, types the files in VS Code, runs commands in VS Code's terminal and reads their output, fixes errors, opens the app next to the code, and fills spreadsheets in WPS Office. <b>Chat</b> mode answers questions about your code (add files with @).</p>
           </div>
         </div>
       </div>
@@ -1019,7 +945,7 @@ $("darkSwitch").onkeydown = (e) => { if (e.key === " " || e.key === "Enter") { e
 $("setTabs").onclick = (e) => {
   const b = e.target.closest("button"); if (!b) return;
   $("setTabs").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
-  ["t-behavior", "t-source", "t-screen", "t-schedule", "t-ai"].forEach((id) => $(id).classList.toggle("hidden", id !== b.dataset.tab));
+  ["t-behavior", "t-source", "t-screen", "t-schedule"].forEach((id) => $(id).classList.toggle("hidden", id !== b.dataset.tab));
 };
 
 /* ================================================================ settings form */
@@ -1052,11 +978,6 @@ function readForm() {
     terminal_timeout: +$("terminal_timeout").value,
     mouse_resume: +$("mouse_resume").value,
     schedule_enabled: $("schedule_enabled").checked,
-    ai_api_key: $("ai_api_key").value,
-    ai_base_url: $("ai_base_url").value.trim(),
-    ai_model: $("ai_model").value.trim(),
-    agent_typing: $("agent_typing").value,
-    agent_wpm: +$("agent_wpm").value,
     schedule_start: $("schedule_start").value || "03:00",
     daily_hours: +$("daily_hours").value,
     serve_seconds: +$("serve_seconds").value,
@@ -1088,8 +1009,6 @@ function fillForm(c) {
                    "keep_finished", "maximize", "background_typing", "run_terminal"]) $(k).checked = !!c[k];
   $("terminal_timeout").value = c.terminal_timeout;
   $("mouse_resume").value = c.mouse_resume; $("serve_seconds").value = c.serve_seconds;
-  $("ai_api_key").value = c.ai_api_key || ""; $("ai_base_url").value = c.ai_base_url; $("ai_model").value = c.ai_model;
-  $("agent_typing").value = c.agent_typing; $("agent_wpm").value = c.agent_wpm; aiKeySet = !!c.ai_key_set; paintAi();
   $("schedule_enabled").checked = !!c.schedule_enabled; $("schedule_start").value = c.schedule_start; $("daily_hours").value = c.daily_hours;
   $("resume_after").value = c.resume_after;
   $("think").value = c.think; $("thinkv").textContent = (+c.think).toFixed(1);
@@ -1338,7 +1257,7 @@ $("code").addEventListener("wheel", (e) => { if (e.deltaY < 0 && follow && activ
 /* ================================================================ agent timeline */
 let events = [], maxEventId = 0, seenEvents = store.get("seen", 0), chat = [];
 const KIND_ICON = { plan: "layers", create: "file", verify: "check", warn: "alert", think: "cpu", start: "play", stop: "stop",
-                    pause: "pause", resume: "play", you: "user", break: "coffee", done: "sparkle", term: "terminal", say: "sparkle", tool: "zap", result: "check" };
+                    pause: "pause", resume: "play", you: "user", break: "coffee", done: "sparkle", term: "terminal" };
 function stepHtml(e) {
   return `<div class="step k-${e.kind}"><div class="si">${ic(KIND_ICON[e.kind] || "zap")}</div><div class="sb">
     <div class="st1"><b>${esc(e.title)}</b><time>${ago(e.t)}</time></div>${e.detail ? `<div class="sd">${esc(e.detail)}</div>` : ""}</div></div>`;
@@ -1346,8 +1265,7 @@ function stepHtml(e) {
 function nowLine() {
   const st = lastStatus; if (!st || !st.running) return "";
   const s = st.stats; let txt = "", spin = true;
-  if (st.agent?.busy) txt = "Agent: " + (st.agent.status || "working") + "…";
-  else if (st.state === "starting") txt = "Starting up…";
+  if (st.state === "starting") txt = "Starting up…";
   else if (st.state === "you" && live.background) txt = `You're working · still writing ${live.file || "code"} in the background` + (live.file ? ` (line ${live.line}/${live.lines_total})` : "") + (s.resume_in ? ` · takes the keyboard back after ${s.resume_in}s idle` : "");
   else if (st.state === "you") { txt = s.resume_in ? `You have control · continues after ${s.resume_in}s idle` : "You have control · press Resume"; spin = false; }
   else if (live.activity === "terminal") txt = "Working in the terminal…";
@@ -1359,72 +1277,18 @@ function nowLine() {
   else txt = "Moving the mouse…";
   return `<div class="now">${spin ? '<i class="spin"></i>' : ic(st.state === "you" ? "user" : "pause")}<span>${esc(txt)}</span></div>`;
 }
-/* ---------------------------------------------------------- markdown (chat answers) */
-function md(text) {
-  const blocks = [];
-  let src = String(text || "").replace(/```([\w+-]*)\n?([\s\S]*?)(```|$)/g, (_, lang, code) => {
-    blocks.push(`<div class="cblock"><div class="cbh"><span>${esc(lang || "code")}</span><button data-copy="${blocks.length}">Copy</button></div><pre>${highlight(code.replace(/\n$/, ""), "x." + (LANG_EXT[(lang || "").toLowerCase()] || lang || "txt"))}</pre></div>`);
-    copyTexts[blocks.length - 1 + copyBase] = code;
-    return `\u0000${blocks.length - 1}\u0000`;
-  });
-  copyBase += blocks.length;
-  src = esc(src)
-    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
-    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>")
-    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  const html = [];
-  let list = null;
-  for (const line of src.split("\n")) {
-    const h = line.match(/^(#{1,3})\s+(.*)/), li = line.match(/^\s*(?:[-*]|(\d+)\.)\s+(.*)/);
-    if (li) { const tag = li[1] ? "ol" : "ul"; if (list !== tag) { if (list) html.push(`</${list}>`); html.push(`<${tag}>`); list = tag; } html.push(`<li>${li[2]}</li>`); continue; }
-    if (list) { html.push(`</${list}>`); list = null; }
-    if (h) html.push(`<h${h[1].length}>${h[2]}</h${h[1].length}>`);
-    else if (line.trim()) html.push(`<p>${line}</p>`);
-  }
-  if (list) html.push(`</${list}>`);
-  return html.join("").replace(/\u0000(\d+)\u0000/g, (_, i) => blocks[+i]).replace(/<p>(<div class="cblock">[\s\S]*?<\/div><\/div>)<\/p>/g, "$1");
-}
-let copyTexts = {}, copyBase = 0;
-const LANG_EXT = { python: "py", py: "py", javascript: "js", js: "js", typescript: "ts", ts: "ts", tsx: "tsx", jsx: "jsx", bash: "sh", sh: "sh",
-  shell: "sh", powershell: "sh", ps1: "sh", go: "go", golang: "go", json: "json", html: "html", css: "css", sql: "sql", java: "java", yaml: "yml", yml: "yml" };
-document.addEventListener("click", (e) => {
-  const b = e.target.closest("[data-copy]"); if (!b) return;
-  const card = b.closest(".cblock"); const text = card.querySelector("pre").innerText;
-  navigator.clipboard?.writeText(text).then(() => { b.textContent = "Copied"; setTimeout(() => b.textContent = "Copy", 1200); });
-});
-
-const TOOL_ICON = (title) => title.startsWith("$") ? "terminal" : title.startsWith("Writing") ? "file" : title.startsWith("Editing") ? "code"
-  : title.startsWith("Reading") || title.startsWith("Looking") ? "eye" : title.startsWith("Starting") || title.startsWith("Opening") ? "monitor"
-  : title.startsWith("Filling") ? "chart" : "zap";
-function agentHtml(e, result) {
-  if (e.kind === "say") return `<div class="bubble"><div class="who"><span class="si">${ic("sparkle")}</span>Invotech 360</div><div class="md">${md(e.detail)}</div></div>`;
-  if (e.kind === "done") return `<div class="tcard done"><div class="th">${ic("check")}<b style="font-family:var(--sans)">${esc(e.title)}</b><time class="usage">${ago(e.t)}</time></div><div class="tr md" style="font-family:var(--sans);max-height:none;color:var(--ink)">${md(e.detail)}</div></div>`;
-  return `<div class="tcard"><div class="th">${ic(TOOL_ICON(e.title))}<b title="${esc(e.title)}">${esc(e.title)}</b><time class="usage">${ago(e.t)}</time></div>${
-    e.detail ? `<div class="tr">${esc(e.detail)}</div>` : ""}${result ? `<div class="tr">${esc(result.detail)}</div>` : ""}</div>`;
-}
 function renderSteps() {
-  // merge server events, the AI conversation and local replies by time
-  const conv = convo.map((m) => ({ type: m.role, text: m.content, t: m.t, order: 0 }));
-  const items = [...events.slice(-120).map((e) => ({ ...e, type: "ev" })), ...chat, ...conv].sort((a, b) => a.t - b.t || (a.order || 0) - (b.order || 0));
+  // merge server events and local chat by time; collapse runs of "think" into the latest
+  const items = [...events.slice(-80).map((e) => ({ ...e, type: "ev" })), ...chat].sort((a, b) => a.t - b.t || (a.order || 0) - (b.order || 0));
   const out = [];
   items.forEach((it, i) => {
     if (it.type === "ev" && it.kind === "think" && items[i + 1]?.kind === "think") return;
-    if (it.type === "ev" && (it.kind === "result" || (it.kind === "plan" && it.title === "Agent task"))) return;
-    if (it.type === "user") out.push(`<div class="bubble user">${esc(it.text)}</div>`);
-    else if (it.type === "assistant") out.push(`<div class="bubble"><div class="who"><span class="si">${ic("sparkle")}</span>Invotech 360</div><div class="md">${md(it.text)}</div></div>`);
+    if (it.type === "user") out.push(`<div class="msg">${esc(it.text)}</div>`);
     else if (it.type === "bot") out.push(`<div class="reply"><div class="si">${ic("sparkle")}</div><div>${it.html}</div></div>`);
-    else if (["say", "tool", "done"].includes(it.kind)) {
-      const res = it.kind === "tool" ? items.slice(i + 1).find((x) => x.type === "ev" && x.kind === "result" && x.title === it.title) : null;
-      out.push(agentHtml(it, res));
-    }
     else out.push(stepHtml(it));
   });
   const box = $("steps"); const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
-  copyTexts = {}; copyBase = 0;
-  box.innerHTML = (out.join("") || `<div class="bubble"><div class="who"><span class="si">${ic("sparkle")}</span>Invotech 360</div><div class="md">${md(aiKeySet
-      ? "Hi! In **Agent** mode give me a task (\"build a REST API with tests\", \"make a budget spreadsheet\") and I'll do it in VS Code / WPS Office while you watch. In **Chat** mode ask anything about your code; add files with @."
-      : "Hi! I write real projects in VS Code and spreadsheets in WPS Office. Add your Groq API key in **Settings › AI** to turn on the AI agent and chat. Meanwhile, press send to start the autopilot or type `help`.")}</div></div>`) + nowLine();
+  box.innerHTML = (out.join("") || `<div class="reply"><div class="si">${ic("sparkle")}</div><div>Hi! I write real projects in your editor, file by file, like a person would.\nPick a project below and press send, or type <code>help</code>.</div></div>`) + nowLine();
   if (atBottom) box.scrollTop = box.scrollHeight;
   $("timeline").innerHTML = events.slice().reverse().map(stepHtml).join("") || '<div class="empty">No activity yet. Start the agent to see each step here.</div>';
   $("recent").innerHTML = events.filter((e) => e.kind !== "think").slice(-6).reverse().map(stepHtml).join("") || '<div class="empty">Nothing yet</div>';
@@ -1508,114 +1372,17 @@ async function runCommand(raw) {
     return reply((did.length ? "Set " + did.join(" · ") + ".\n" : "") + (r?.ok ? "Starting now. Use your mouse any time and I'll step aside." : "Couldn't start: " + esc(r?.message || "unknown error")));
   }
   if (did.length) return reply("Set " + did.join(" · ") + "." + (running ? "\nThat applies from the next start (I'm mid-run)." : "\nSay <code>start</code> when ready."));
-  reply(aiKeySet ? `I didn't catch that as a bot command. Switch to <b>Agent</b> or <b>Chat</b> mode above to give it to the AI.`
-    : `I didn't catch that. Type <code>help</code> for bot commands, or add your Groq key in <button class="link" data-go="behavior" onclick="setTimeout(()=>document.querySelector('[data-tab=t-ai]').click(),50)">Settings › AI</button> to talk to the AI agent.`);
+  reply(`I didn't catch that. Type <code>help</code> to see what I can do.`);
 }
-/* ---------------------------------------------------------- AI: agent + chat */
-let aiKeySet = false, aiMode = store.get("aimode", "agent"), convo = store.get("convo", []), ctxOpen = store.get("ctxOpen", true), ctxProject = false, waiting = false;
-const MODELS = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct", "qwen/qwen3-32b", "llama-3.1-8b-instant"];
-function paintAi() {
-  $("aiState").textContent = aiKeySet ? "key saved" : "not set"; $("aiState").className = "pill " + (aiKeySet ? "running" : "");
-  document.querySelectorAll("[data-amode]").forEach((b) => b.classList.toggle("on", b.dataset.amode === aiMode));
-  const cur = $("ai_model").value || MODELS[0];
-  const opts = [...new Set([cur, ...MODELS, ...(window.extraModels || [])])];
-  $("qModel").innerHTML = opts.map((m) => `<option value="${esc(m)}">${esc(m.split("/").pop())}</option>`).join("");
-  $("qModel").value = cur;
-  $("modelList").innerHTML = opts.map((m) => `<option value="${esc(m)}">`).join("");
-  $("ask").placeholder = !aiKeySet ? "Type a bot command (help) - add a Groq key in Settings › AI for the AI agent"
-    : aiMode === "agent" ? "Give the agent a task… e.g. build a REST API with tests (@ to add a file)" : "Ask about your code… (@ to add a file)";
-  renderCtx(); renderQuick();
-}
-document.querySelectorAll("[data-amode]").forEach((b) => b.onclick = () => { aiMode = b.dataset.amode; store.set("aimode", aiMode); paintAi(); });
-$("qModel").onchange = () => { $("ai_model").value = $("qModel").value; saveSettings(); };
-$("newChat").onclick = () => { convo = []; chat = []; store.set("convo", convo); renderSteps(); toast("New conversation"); };
-function openFileName() { const t = tabs.find((x) => x.id === activeTab && x.id !== "preview"); return t ? t.path : live.file || ""; }
-function renderCtx() {
-  const f = openFileName();
-  $("ctxbar").innerHTML = (f ? `<span class="chip ${ctxOpen ? "on" : ""}" data-ctx="open" title="Include the open file">${ic("file")}${esc(f.split("/").pop())}</span>` : "") +
-    (aiMode === "agent" && live.project ? `<span class="chip ${ctxProject ? "on" : ""}" data-ctx="project" title="Work in the current project instead of a new folder">${ic("folder")}in ${esc(live.project)}</span>` : "");
-}
-$("ctxbar").onclick = (e) => {
-  const c = e.target.closest("[data-ctx]"); if (!c) return;
-  if (c.dataset.ctx === "open") { ctxOpen = !ctxOpen; store.set("ctxOpen", ctxOpen); } else ctxProject = !ctxProject;
-  renderCtx();
-};
-const QUICK = {
-  agent: ["Build a REST API for a todo list in Python with tests", "Create a static website with a contact form and open it",
-          "Make a monthly budget spreadsheet with totals and charts-ready columns", "Fix the failing tests in this project"],
-  chat: ["Explain the open file", "Find bugs in the open file", "Write unit tests for the open file", "Suggest improvements"],
-};
-function renderQuick() {
-  $("quick").innerHTML = aiKeySet && !convo.length ? QUICK[aiMode].map((q) => `<span class="chip" data-q="${esc(q)}">${ic(aiMode === "agent" ? "zap" : "msg")}${esc(q)}</span>`).join("") : "";
-}
-$("quick").onclick = (e) => { const q = e.target.closest("[data-q]"); if (q) send(q.dataset.q); };
-function pushMsg(role, content) { convo.push({ role, content, t: Date.now() / 1000 }); convo = convo.slice(-60); store.set("convo", convo); renderSteps(); renderQuick(); }
-const CONTROL = /^(help|\?|commands|status|stop|halt|kill|cancel|pause|resume|continue|start|go|preview|watch( it)?|open (the )?(editor|vs ?code)|loop forever|new project.*|.*\b\d{2,3}\s*wpm\b.*|typing only|mouse only|mouse and typing|snippets.*|all projects|write [\w-]+( at \d+ wpm)?|think [\d.]+|typos? [\d.]+%?)$/;
-function mentioned(text) { const known = new Set([...live.files, ...treeSource().files]); return [...text.matchAll(/@([\w./-]+)/g)].map((m) => m[1]).filter((f) => known.has(f)); }
-async function send(raw) {
-  const text = raw.trim(); if (!text || waiting) return;
-  const t = text.toLowerCase();
-  if (!aiKeySet || CONTROL.test(t)) return runCommand(text);
-  pushMsg("user", text);
-  waiting = true; $("hint").textContent = aiMode === "chat" ? "Thinking…" : "Starting the agent…";
-  try {
-    if (aiMode === "chat") {
-      const r = await api("/api/chat", { messages: convo.map(({ role, content }) => ({ role, content })), files: mentioned(text),
-                                         include_open: ctxOpen, model: $("qModel").value });
-      pushMsg("assistant", r.ok ? r.reply : "⚠ " + r.message);
-    } else {
-      const r = await api("/api/agent", { ...readForm(), ai_model: $("qModel").value, task: text,
-                                          folder: ctxProject && live.project ? live.project : "" });
-      if (r.ok) { go("agent"); pushMsg("assistant", "On it - watch VS Code. Each step shows up here; press ■ to stop me."); }
-      else pushMsg("assistant", "⚠ " + r.message);
-      render(r.status);
-    }
-  } catch (err) { pushMsg("assistant", "⚠ " + err); }
-  waiting = false; $("hint").textContent = "Enter to send · Shift+Enter new line · @ file · help for bot commands";
-}
-
-/* @ mentions */
-let mIndex = 0, mItems = [];
-function mentionQuery() { const a = $("ask"); const m = a.value.slice(0, a.selectionStart).match(/@([\w./-]*)$/); return m ? m[1] : null; }
-function renderMention() {
-  const q = mentionQuery(); const box = $("mention");
-  if (q === null) { box.classList.add("hidden"); return; }
-  mItems = [...new Set([...live.files, ...treeSource().files])].filter((f) => f.toLowerCase().includes(q.toLowerCase())).slice(0, 12);
-  if (!mItems.length) { box.classList.add("hidden"); return; }
-  mIndex = Math.min(mIndex, mItems.length - 1);
-  box.innerHTML = mItems.map((f, i) => `<div class="${i === mIndex ? "on" : ""}" data-m="${i}">${esc(f)}</div>`).join("");
-  box.classList.remove("hidden");
-}
-function pickMention(i) {
-  const a = $("ask"); const pos = a.selectionStart; const before = a.value.slice(0, pos).replace(/@([\w./-]*)$/, "@" + mItems[i] + " ");
-  a.value = before + a.value.slice(pos); a.selectionStart = a.selectionEnd = before.length; $("mention").classList.add("hidden"); a.focus();
-}
-$("mention").onmousedown = (e) => { const d = e.target.closest("[data-m]"); if (d) { e.preventDefault(); pickMention(+d.dataset.m); } };
-$("ask").addEventListener("input", () => { mIndex = 0; renderMention(); });
 $("ask").addEventListener("keydown", (e) => {
-  if (!$("mention").classList.contains("hidden")) {
-    if (e.key === "ArrowDown") { e.preventDefault(); mIndex = (mIndex + 1) % mItems.length; return renderMention(); }
-    if (e.key === "ArrowUp") { e.preventDefault(); mIndex = (mIndex - 1 + mItems.length) % mItems.length; return renderMention(); }
-    if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); return pickMention(mIndex); }
-    if (e.key === "Escape") { $("mention").classList.add("hidden"); return; }
-  }
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); const v = $("ask").value; $("ask").value = ""; autosize(); send(v); }
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); const v = $("ask").value; $("ask").value = ""; autosize(); runCommand(v); }
 });
-
-/* settings: test the key */
-$("aiTest").onclick = async () => {
-  $("aiMsg").textContent = "Testing…";
-  const r = await api("/api/ai/test", readForm());
-  $("aiMsg").textContent = r.message; $("aiMsg").style.color = r.ok ? "var(--green)" : "var(--red)";
-  if (r.ok) { aiKeySet = true; window.extraModels = (r.models || []).filter((m) => !/whisper|tts|guard|playai|distil/i.test(m)); $("ai_api_key").value = "••••••••"; paintAi(); }
-};
-$("sheetStart").onclick = () => { $("source").value = "spreadsheets"; toggleBoxes(); syncQuickProject(); saveSettings().then(() => { go("agent"); doStart(); }); };
 const autosize = () => { const a = $("ask"); a.style.height = "auto"; a.style.height = Math.min(160, a.scrollHeight) + "px"; };
 $("ask").addEventListener("input", autosize);
 $("send").onclick = () => {
   if (lastStatus?.running) return doStop();
   const v = $("ask").value.trim(); $("ask").value = ""; autosize();
-  if (v) send(v); else doStart();
+  if (v) runCommand(v); else doStart();
 };
 function syncQuickProject() {
   const sel = selectedProjects();
@@ -1713,7 +1480,6 @@ function render(st) {
   $("s_left").textContent = s.ends_at && st.running ? fmt(s.ends_at - Date.now() / 1000) : "∞";
 
   const pct = s.lines_total ? Math.min(100, 100 * s.line / s.lines_total) : 0;
-  const agentBusy = !!st.agent?.busy;
   if (s.file) {
     const where = `${s.project} / ${s.file}`;
     $("p_where").textContent = s.file; $("o_where").textContent = where;
@@ -1728,11 +1494,6 @@ function render(st) {
     $("barCrumb").textContent = "";
   }
   $("p_bar").style.width = pct + "%"; $("o_bar").style.width = pct + "%";
-  if (agentBusy) {
-    $("runTitle").textContent = "AI agent · " + (live.project || "new project");
-    $("p_where").textContent = st.agent.status || "working"; $("p_line").textContent = "";
-    $("p_files").textContent = `${live.done.length} file(s) written`; $("p_verify").textContent = "";
-  }
   $("sbProjectText").textContent = s.project || "no project";
   $("sbMonText").textContent = st.monitor || "screen";
   const probs = s.mismatched; $("sbProbText").textContent = probs; $("probCount").textContent = probs;
@@ -1741,9 +1502,6 @@ function render(st) {
                 ["Commands run", s.commands || 0], ["Scrolls", s.scrolls], ["Breaks taken", s.breaks], ["Times you took over", s.takeovers]];
   $("sessionRows").innerHTML = rows.map(([k, v]) => `<div class="prow"><span>${k}</span><b>${esc(v)}</b></div>`).join("");
 
-  const u = st.agent?.usage;
-  $("tokUse").textContent = u && u.calls ? `${((u.prompt + u.completion) / 1000).toFixed(1)}k tokens` : "";
-  renderCtx();
   const sc = st.schedule;
   if (sc) {
     $("sch_used").textContent = sc.used_text; $("sch_left").textContent = sc.left_text; $("sch_next").textContent = sc.next_start_text;
