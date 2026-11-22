@@ -176,3 +176,21 @@ def guess_wait(cmd):
     if any(w in low for w in ("build", "vet", "tsc", "compile", "lint")):
         return 15
     return 12
+
+
+def explain_command(cmd, serve=False):
+    """A plain-English line the bot types (echo) before running a command."""
+    low = cmd.lower()
+    if serve:
+        return "Starting the app so we can see it running"
+    if "venv" in low:
+        return "Creating a separate Python environment for this project"
+    if "install" in low:
+        return "Installing what the project needs"
+    if "test" in low:
+        return "Running the tests to check everything works"
+    if "vet" in low or "compileall" in low or "tsc" in low or "build" in low:
+        return "Checking the code for mistakes"
+    if "selftest" in low or low.startswith(("node ", "python ")):
+        return "Running the program"
+    return "Running: " + cmd.split()[0]

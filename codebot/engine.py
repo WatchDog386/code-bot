@@ -25,7 +25,7 @@ from . import human
 from .editor import FocusedWindowEditor, NotepadEditor, VSCodeEditor, doc_end_keys
 from .monitors import get_monitors, pick_monitor
 from .gen import LANGUAGES as GEN_LANGUAGES, generated_cycle
-from .projects import (guess_wait, list_projects, localize_command, project_commands, project_cycle,
+from .projects import (explain_command, guess_wait, list_projects, localize_command, project_commands, project_cycle,
                        project_scaffold)
 from .snippets import LANGUAGES, pick_pool
 
@@ -1167,6 +1167,12 @@ class Bot:
                 time.sleep(random.uniform(0.8, 1.6))
             else:
                 self.editor.click_terminal(use_mouse=mouse, stop=self._halt)
+            # first say in plain words what's about to happen, then run it
+            note = explain_command(cmd, step["serve"])
+            if self._type_text(f'echo "{note}"', base, mirror=False) is None:
+                return None
+            pyautogui.press("enter")
+            time.sleep(random.uniform(0.6, 1.2))
             n = self._type_text(cmd, base, mirror=False)
             if n is None:
                 return None
@@ -1175,7 +1181,7 @@ class Bot:
             pyautogui.press("enter")
         self._term(f"(VS Code terminal) $ {cmd}")
         if not step["serve"]:
-            self.event("term", f"$ {cmd}", "in the VS Code terminal")
+            self.event("term", f"$ {cmd}", explain_command(cmd))
             # the bot can't read VS Code's terminal, so give the command a realistic time
             return True if self._wait((step["wait"] or guess_wait(cmd)) * random.uniform(0.9, 1.3)) else None
         self.event("term", f"$ {cmd}", "starting the app in the VS Code terminal")
