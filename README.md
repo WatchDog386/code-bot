@@ -258,7 +258,7 @@ python -m codebot.gen --out projects --count 6
 - **Clean workspace**: the workspace only ever holds the project being written. When a new
   project starts, the previous one is deleted (tick "Keep finished projects" to keep them).
   Folders you put there yourself are never touched, and `.vscode` is hidden from the explorer.
-- **Human pace**: about 34 WPM raw, plus thinking pauses before functions, between lines,
+- **Human pace**: about 80 WPM raw (0.15 s per keystroke, the same in VS Code and WPS/Excel), plus thinking pauses before functions, between lines,
   between files (6-20 s) and projects (25-60 s), and occasional 5-14 s "stop and think"
   moments. The "Thinking pauses" slider scales all of them.
 - **Human typing**: word-by-word rhythm, slower on symbols and capitals, thinking pauses before
