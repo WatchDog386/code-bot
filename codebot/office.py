@@ -55,7 +55,36 @@ _STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </styleSheet>"""
 
 
-def blank_xlsx(path, sheet="Sheet1"):
+def blank_xlsx(path, sheet="Sheet1", sheets=None):
+    """An empty .xlsx with one sheet per name in `sheets` (or just `sheet`)."""
+    names = [n.replace("&", "and")[:31] for n in (sheets or [sheet])]
+    ct = _CT.replace('<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+                     "".join(f'<Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+                             for i in range(1, len(names) + 1)))
+    wb = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+          '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' +
+          "".join(f'<sheet name="{n}" sheetId="{i}" r:id="rId{i}"/>' for i, n in enumerate(names, 1)) +
+          "</sheets></workbook>")
+    rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+            "".join(f'<Relationship Id="rId{i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{i}.xml"/>'
+                    for i in range(1, len(names) + 1)) +
+            f'<Relationship Id="rId{len(names) + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            "</Relationships>")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", ct)
+        z.writestr("_rels/.rels", _RELS)
+        z.writestr("xl/workbook.xml", wb)
+        z.writestr("xl/_rels/workbook.xml.rels", rels)
+        for i in range(1, len(names) + 1):
+            z.writestr(f"xl/worksheets/sheet{i}.xml", _SHEET)
+        z.writestr("xl/styles.xml", _STYLES)
+    return path
+
+
+def _old_blank_xlsx(path, sheet="Sheet1"):
     """Write an empty, valid .xlsx workbook (no extra libraries needed)."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -183,7 +212,8 @@ class OfficeEditor:
     def begin_file(self, rel, show=True):
         path = os.path.join(self.project_dir, *rel.split("/"))
         title = os.path.splitext(os.path.basename(rel))[0].replace("-", " ").title()
-        blank_xlsx(path, sheet=title[:31])
+        blank_xlsx(path, sheet=title[:31], sheets=getattr(self, "next_sheets", None) or None)
+        self.next_sheets = None
         self.current = path
         self.open_file(path)
         return path

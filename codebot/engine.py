@@ -67,7 +67,7 @@ class Config:
     monitor: int = -1                  # -1 = auto (a screen that isn't the main one)
     maximize: bool = True              # maximize the editor on that screen
     mode: str = "both"                 # both | mouse | type
-    wpm: int = 34                      # raw typing speed (pauses come on top)
+    wpm: int = 80                      # raw typing speed: 80 WPM = about 0.15 s per key (pauses come on top)
     think: float = 1.0                 # how long the "thinking" pauses are (0.5 - 3)
     typo_rate: float = 0.015
     mouse_min: float = 4.0
@@ -97,6 +97,8 @@ class Config:
         base.update({k: v for k, v in (d or {}).items() if k in base})
         c = cls(**base)
         c.wpm = max(5, min(200, int(c.wpm)))
+        if c.wpm == 34:                # the old default: now 0.15 s per key
+            c.wpm = 80
         c.think = max(0.3, min(3.0, float(c.think)))
         c.mouse_min = max(0.5, float(c.mouse_min))
         c.mouse_max = max(c.mouse_min, float(c.mouse_max))
@@ -1092,49 +1094,105 @@ class Bot:
         return True
 
     # ----------------------------------------------------------- spreadsheets
+    def _bold_header(self):
+        pyautogui.hotkey("ctrl", "home")
+        pyautogui.hotkey("shift", "space")          # the header row
+        pyautogui.hotkey("ctrl", "b")
+        time.sleep(0.3)
+        pyautogui.hotkey("ctrl", "home")
+
+    def _sheet_ready(self):
+        """True when the bot may type into the spreadsheet right now (WPS/Excel in front)."""
+        if not self._hands.is_set():
+            return False
+        if self.editor.is_active() is False:
+            self.editor.focus(force=True)
+            time.sleep(0.4)
+            if self.editor.is_active() is False:
+                return False                         # not in front: never type anywhere else
+        return True
+
     def _type_sheet(self, rows):
-        """Type a table into Excel: a cell, Tab, the next cell... Enter at the end of a row
-        (Excel goes back to column A). Then the header row is made bold."""
+        """Type a workbook into WPS / Excel, sheet by sheet: a cell, Tab, the next cell... Enter
+        at the end of a row (back to column A). Each sheet's header row is made bold, then
+        Ctrl+PageDown moves to the next sheet tab. If you take over mid-cell, it carries on in
+        that same cell when you leave it alone again."""
+        from .books import SHEET
         base = 60.0 / (self.cfg.wpm * 5)
         self.stats["lines_total"] = len(rows)
-        for idx, row in enumerate(rows):
-            if not self._gate_hands():
-                return False
+        sheet_no = 0
+        idx = 0
+        while idx < len(rows):
+            row = rows[idx]
+            if row and row[0] == SHEET:                  # start of the next sheet
+                while True:
+                    if not self._gate_hands():
+                        return False
+                    with self._act():
+                        if self._sheet_ready():
+                            if sheet_no > 0:
+                                self._bold_header()
+                                pyautogui.hotkey("ctrl", "pagedown")
+                                time.sleep(random.uniform(0.6, 1.2))
+                            pyautogui.hotkey("ctrl", "home")
+                            break
+                    if not self._wait(0.5):
+                        return False
+                sheet_no += 1
+                self.live["text"] += f"===== {row[1]} =====\n"
+                self.event("plan", f"Sheet {row[1]}", "entering data")
+                if not self._wait(random.uniform(1.5, 4.0) * self.cfg.think):
+                    return False
+                idx += 1
+                continue
             self._energy = min(1.25, max(0.75, self._energy + random.uniform(-0.03, 0.03)))
             pause = random.uniform(0.3, 1.6) * self.cfg.think if row else 0.3
             self.activity = "thinking" if pause > 1.2 else "typing"
             if not self._wait(pause):
                 return False
-            with self._act():
-                if not self._hands.is_set():
-                    continue
-                if self.editor.is_active() is False:
-                    self.editor.focus(force=True)
-                    time.sleep(0.4)
-                    if self.editor.is_active() is False:
-                        continue                         # Excel isn't in front: don't type anywhere
-                self.activity = "typing"
-                for c, cell in enumerate(row):
-                    if cell:
-                        if self._type_text(str(cell), base / self._energy) is None:
-                            return False
-                        if not cell.startswith("=") and not re.fullmatch(r"-?[\d.,]+", cell):
-                            pyautogui.press("delete")       # drop any AutoComplete suggestion
-                    if c < len(row) - 1:
-                        pyautogui.press("tab")
-                        self.live["text"] += "\t"
-                        time.sleep(base * random.uniform(0.8, 2.0))
-                pyautogui.press("enter")
-                self.live["text"] += "\n"
+            c, off, entered = 0, 0, False
+            while not entered:
+                if not self._gate_hands():
+                    return False
+                with self._act():
+                    if not self._sheet_ready():
+                        pass
+                    else:
+                        self.activity = "typing"
+                        while c < len(row):
+                            cell = str(row[c] or "")
+                            if off < len(cell):
+                                n = self._type_text(cell[off:], base / self._energy)
+                                if n is None:
+                                    return False
+                                off += n
+                                if off < len(cell):
+                                    break                    # you took the keyboard: finish this cell later
+                                if not cell.startswith("=") and not re.fullmatch(r"-?[\d.,]+", cell):
+                                    pyautogui.press("delete")    # drop any AutoComplete suggestion
+                            if not self._hands.is_set():
+                                break
+                            if c < len(row) - 1:
+                                pyautogui.press("tab")
+                                self.live["text"] += "\t"
+                                time.sleep(base * random.uniform(0.8, 2.0))
+                            c, off = c + 1, 0
+                        if c >= len(row) and self._hands.is_set():
+                            pyautogui.press("enter")
+                            self.live["text"] += "\n"
+                            entered = True
+                if not entered and not self._wait(0.3):
+                    return False
             self.stats["lines"] += 1
             self.stats["line"] = idx + 1
+            idx += 1
         with self._act():
             if self._hands.is_set() and self.editor.is_active() is not False:
-                pyautogui.hotkey("ctrl", "home")
-                pyautogui.hotkey("shift", "space")          # the header row
-                pyautogui.hotkey("ctrl", "b")
-                time.sleep(0.3)
-                pyautogui.hotkey("ctrl", "home")
+                self._bold_header()
+                if sheet_no > 1:
+                    for _ in range(sheet_no - 1):        # back to the first sheet before saving
+                        pyautogui.hotkey("ctrl", "pageup")
+                        time.sleep(0.3)
         return True
 
     def _use_editor_for(self, meta):
@@ -1200,6 +1258,9 @@ class Bot:
                     return
                 self.stats.update(file=rel, file_index=i, line=0)
                 self.live.update(file=rel, text="")
+                if isinstance(content, list) and self.editor.kind == "office":
+                    from .books import sheet_names
+                    self.editor.next_sheets = sheet_names(content)   # the workbook gets all its sheet tabs
                 self.event("create", f"Created {rel}", f"{len(content)} rows" if isinstance(content, list)
                            else f"{content.count(chr(10)) + 1} lines")
                 self.log(f"Writing {project}/{rel}")

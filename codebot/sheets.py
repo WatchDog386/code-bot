@@ -190,22 +190,10 @@ def customers(rng):
 
 MAKERS = [budget, sales, inventory, payroll, grades, expenses, tracker, customers]
 
-# The data entry projects you can pick in the dashboard (fresh data every time)
-CATALOG = {
-    "monthly-budget": ("Monthly Budget", budget, "12 months of costs per category, totals, averages, shares"),
-    "sales-report": ("Sales Report", sales, "Sales entries with revenue, discount, net and a region summary"),
-    "inventory-valuation": ("Inventory Valuation", inventory, "Stock in/out, closing stock, value and reorder status"),
-    "payroll": ("Payroll", payroll, "Staff pay with overtime, PAYE, NSSF, SHIF, net pay per department"),
-    "class-results": ("Class Results", grades, "Marks per subject with totals, averages, grades and ranks"),
-    "expense-claims": ("Expense Claims", expenses, "Expense entries with VAT, approvals and a category summary"),
-    "project-tracker": ("Project Tracker", tracker, "Tasks with dates, progress, budget vs spent and status"),
-    "customer-register": ("Customer Register", customers, "Customer records with plans, billing, balances per county"),
-}
-
-
 def list_sheet_projects():
     """[{name, title, desc}] - the ready-made ones plus your uploads."""
-    out = [{"name": k, "title": t, "desc": d} for k, (t, _, d) in CATALOG.items()]
+    from .books import BOOKS
+    out = [{"name": k, "title": t, "desc": d} for k, (t, _, d) in BOOKS.items()]
     for f in uploaded():
         out.append({"name": "upload:" + f, "title": os.path.splitext(f)[0], "desc": "Your uploaded workbook"})
     return out
@@ -215,13 +203,20 @@ def sheet_project(name, rng=None):
     """One data entry project by its name (fresh random data for the ready-made ones)."""
     if name.startswith("upload:"):
         return uploaded_project(name[len("upload:"):])
-    title, make, _ = CATALOG[name]
+    from .books import BOOKS
+    title, make, _ = BOOKS[name]
     slug, title, rows = make(rng or random.Random())
     return {"name": slug, "title": title, "kind": "sheet", "files": [(f"{slug}.xlsx", rows)], "scaffold": [],
             "steps": [], "language": "spreadsheet", "records": [title]}
 
 
 def generate(seed=None, count=None):
+    from .books import BOOKS
+    rng = random.Random(seed)
+    return sheet_project(rng.choice(sorted(BOOKS)), rng)
+
+
+def _old_generate(seed=None, count=None):
     rng = random.Random(seed)
     makers = MAKERS[:]
     rng.shuffle(makers)
@@ -339,4 +334,5 @@ def sheets_cycle(seed=None, selected=None):
 
 def as_text(rows):
     """Rows as tab-separated text (the dashboard shows this while it's typed)."""
-    return "\n".join("\t".join(r) for r in rows) + "\n"
+    from .books import SHEET
+    return "\n".join(f"===== {r[1]} =====" if r and r[0] == SHEET else "\t".join(r) for r in rows) + "\n"
