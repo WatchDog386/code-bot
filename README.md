@@ -202,7 +202,7 @@ Turn it off under Settings > Screen & workspace.
 
 ## Live preview
 
-The monitor button above the editor in the dashboard (or `preview` in the agent box) opens a
+The monitor button above the editor in the dashboard (or `preview` in the command box) opens a
 **Preview** tab with a live picture of the bot's screen (VS Code, its terminal), updated every
 second. On macOS allow **Screen Recording** for your terminal / Python in System Settings >
 Privacy & Security.
@@ -234,7 +234,7 @@ longer stops it either.
 ## Projects: a new one every time
 
 The bot **comes up with a new project for every run** ("New project every time" in
-Settings > What to write, or `new project` in the agent box). It picks one of 14 kinds of
+Settings > What to write, or `new project` in the command box). It picks one of 14 kinds of
 business app (library, clinic, hotel, fleet, school, warehouse, restaurant, gym, events, real
 estate, help desk, payroll, farm, shipping) and one of 3 languages:
 
