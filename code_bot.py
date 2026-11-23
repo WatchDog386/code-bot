@@ -43,6 +43,7 @@ def main():
     p.add_argument("--list-screens", action="store_true", help="show the screens and exit")
     p.add_argument("--no-detect", action="store_true", help="don't pause when you use the mouse/keyboard")
     p.add_argument("--resume-after", type=float, default=20, help="idle seconds before continuing (0 = stay paused)")
+    p.add_argument("--repeat", action="store_true", help="keep going forever (default: stop when done)")
     p.add_argument("--keep-finished", action="store_true", help="keep finished projects in the workspace")
     p.add_argument("--typo-rate", type=float, default=0.015)
     p.add_argument("--mouse-min", type=float, default=4.0)
@@ -72,7 +73,7 @@ def main():
         "auto_open_editor": a.editor != "focused", "keep_focus": a.editor != "focused",
         "start_delay": a.delay, "think": a.think, "monitor": a.monitor - 1,
         "detect_user": not a.no_detect, "resume_after": a.resume_after,
-        "keep_finished": a.keep_finished,
+        "keep_finished": a.keep_finished, "repeat": a.repeat,
     })
     try:
         while bot.running:

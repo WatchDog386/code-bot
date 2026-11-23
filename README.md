@@ -22,8 +22,14 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-This opens a **new VS Code window** on the workspace folder `~/dev-projects` and the dashboard
-in your browser. Press **Start**.
+This opens **only the dashboard** in your browser. Nothing else happens yet.
+
+1. Tick the project you want written.
+2. Press **Start**.
+3. VS Code opens on `~/dev-projects` with just the **file explorer** on the left and the code
+   editor (no terminal, no chat panel). The bot creates the project's files one by one in the
+   explorer, opens each one and types it, until the whole project is written. Then it stops.
+   (Tick "Keep going when finished" to have it carry on with more projects.)
 
 **First run only:** VS Code may ask "Do you trust the authors of the files in this folder?".
 Click **Yes, I trust the authors** (tick "trust parent folder") so it never asks again.
@@ -33,6 +39,8 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `python app.py --autostart` | open everything and start immediately |
+| `python app.py --open-editor` | open VS Code right away instead of waiting for Start |
+| `python code_bot.py --repeat` | keep writing projects forever instead of stopping |
 | `python code_bot.py` | terminal only, no dashboard |
 | `python code_bot.py --projects task-tracker-api --wpm 70` | one project, faster |
 | `python code_bot.py --editor notepad` | Notepad instead of VS Code |
@@ -71,8 +79,13 @@ the bot's mouse never leaves it. "Auto" picks a side screen (not your main one).
   as a VS Code tab and types it top to bottom. The explorer tree fills up like a real project,
   files autosave, then it moves on to the next project, forever.
 - **Clean code**: the workspace gets a `.vscode/settings.json` that turns off auto-closing
-  brackets/quotes, auto-indent, IntelliSense, Copilot and format-on-save, so what gets typed is
-  exactly the source. After each file the bot checks that the saved file matches the source
+  brackets/quotes, auto-indent, Copilot and format-on-save, so what gets typed is exactly the source.
+- **Autocomplete for show**: suggestion popups appear while it types, like a real editor, but
+  they are never accepted (Enter, Tab and characters like `(` or `.` can't accept them).
+- **Only the editor**: the terminal panel, chat side bar, welcome pages and tips are hidden.
+  Keyboard focus always goes back to the code editor, so nothing is ever typed into a terminal.
+- **Mouse stays in VS Code**: the mouse only moves inside the VS Code window (code area and
+  file explorer), never anywhere else on the screen. After each file the bot checks that the saved file matches the source
   ("files verified clean" in the dashboard).
 - **Clean workspace**: the workspace only ever holds the project being written. When a new
   project starts, the previous one is deleted (tick "Keep finished projects" to keep them).

@@ -82,7 +82,7 @@
         <button id="start" class="primary">▶ Start</button>
         <button id="pause">❚❚ Pause</button>
         <button id="stop" class="danger">■ Stop</button>
-        <button id="openEditor">Open editor</button>
+        <button id="openEditor" title="Optional - Start opens it for you">Open editor</button>
         <div class="spacer"></div>
         <span class="muted" id="info"></span>
       </div>
@@ -155,8 +155,11 @@
           </select></div>
       </div>
       <div id="box_projects">
-        <label>Projects (none ticked = all, cycles forever)</label>
+        <label>Project to write (tick one or more - none ticked = all)</label>
         <div class="langs" id="projects"></div>
+        <div class="checks" style="grid-template-columns:1fr">
+          <label><input type="checkbox" id="repeat"> Keep going when finished (off = stop when every file is written)</label>
+        </div>
       </div>
       <div id="box_snippets" class="hidden">
         <label>Languages</label>
@@ -226,6 +229,7 @@ function readForm() {
     review_moves: $("review_moves").checked,
     detect_user: $("detect_user").checked,
     keep_finished: $("keep_finished").checked,
+    repeat: $("repeat").checked,
     maximize: $("maximize").checked,
     resume_after: +$("resume_after").value,
     think: +$("think").value,
@@ -247,7 +251,7 @@ function fillForm(c) {
   for (const k of ["mouse_min", "mouse_max", "minutes", "clear_after_lines", "start_delay", "custom_file",
                    "editor", "source", "workspace_dir"]) $(k).value = c[k];
   for (const k of ["scroll", "breaks", "auto_open_editor", "keep_focus", "review_moves", "detect_user",
-                   "keep_finished", "maximize"]) $(k).checked = !!c[k];
+                   "keep_finished", "maximize", "repeat"]) $(k).checked = !!c[k];
   $("resume_after").value = c.resume_after;
   $("think").value = c.think; $("thinkv").textContent = (+c.think).toFixed(1);
   $("monitor").innerHTML = '<option value="-1">Auto (a side screen)</option>' +

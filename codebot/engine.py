@@ -51,6 +51,7 @@ class Config:
     projects: list = field(default_factory=list)   # empty = all
     workspace_dir: str = "~/dev-projects"
     keep_finished: bool = False        # False = workspace only ever holds the current project
+    repeat: bool = False               # False = write the chosen project(s) once, then stop
     languages: list = field(default_factory=lambda: list(LANGUAGES))
     custom_file: str = ""
     monitor: int = -1                  # -1 = auto (a screen that isn't the main one)
@@ -201,7 +202,18 @@ class Bot:
         ok = self.editor.open()
         if ok and cfg.maximize:
             self.editor.place(self.monitor.work)
+        self._confine_mouse()
         return ok
+
+    def _confine_mouse(self):
+        """The bot's mouse stays inside the editor window (not the title bar,
+        tabs strip or status bar) - never anywhere else on the screen."""
+        if self.editor is None:
+            return None
+        l, t, w, h = self.editor.region()
+        rect = (l + int(w * 0.01), t + int(h * 0.09), int(w * 0.98), int(h * 0.84))
+        human.set_bounds(rect)
+        return (l, t, w, h)
 
     # ------------------------------------------------------------- controls
     def start(self, cfg_dict=None):
@@ -283,6 +295,8 @@ class Bot:
                 injected = None
             if key == keyboard.Key.esc:
                 now = time.time()
+                if now - human.last_bot_esc < 0.5:
+                    return  # the bot closing a suggestion popup, not you
                 if now - self._last_esc < DOUBLE_ESC_WINDOW:
                     self._last_esc = 0
                     if self.running:
@@ -353,6 +367,8 @@ class Bot:
             self._need_refocus = False
             self.editor.focus(force=True)
             time.sleep(0.25)
+            if hasattr(self.editor, "focus_code"):
+                self.editor.focus_code()
             pyautogui.hotkey(*doc_end_keys())
             time.sleep(0.15)
 
@@ -421,16 +437,19 @@ class Bot:
             with self._act():  # all pyautogui calls stay under the lock (X11 isn't thread-safe)
                 if self._halt():
                     continue
-                l, t, w, h = self.editor.region() if self.editor else human.bounds()
+                win = self._confine_mouse() or human.bounds()
+                l, t, w, h = win
+                code = (l + int(w * 0.22), t + int(h * 0.12), int(w * 0.6), int(h * 0.7))
                 if r < 0.45:
                     human.micro_drift(stop=self._halt)
-                elif r < 0.68:
-                    human.read_lines((l, t, w, h), stop=self._halt)
-                elif r < 0.80:  # glance at the file explorer / sidebar
-                    human.move_to(l + w * random.uniform(0.04, 0.16), t + h * random.uniform(0.15, 0.7),
+                elif r < 0.75:  # follow the code with the eyes
+                    human.read_lines(code, stop=self._halt)
+                elif r < 0.87:  # glance at the file explorer
+                    human.move_to(l + w * random.uniform(0.04, 0.15), t + h * random.uniform(0.15, 0.7),
                                   stop=self._halt)
-                elif r < 0.92 and self.cfg.scroll:
-                    human.move_to(l + w * random.uniform(0.3, 0.7), t + h * random.uniform(0.3, 0.7),
+                elif self.cfg.scroll:  # scroll the code a little
+                    cx, cy, cw, ch = code
+                    human.move_to(cx + cw * random.uniform(0.2, 0.8), cy + ch * random.uniform(0.2, 0.8),
                                   stop=self._halt)
                     for _ in range(random.randint(1, 4)):
                         if self._halt():
@@ -438,10 +457,8 @@ class Bot:
                         pyautogui.scroll(random.choice([-3, -2, -1, 1, 2]))
                         time.sleep(random.uniform(0.1, 0.4))
                     self.stats["scrolls"] += 1
-                else:  # somewhere else on this screen
-                    bx, by, bw, bh = human.bounds()
-                    human.move_to(bx + random.uniform(0.1, 0.9) * bw, by + random.uniform(0.1, 0.9) * bh,
-                                  stop=self._halt)
+                else:
+                    human.micro_drift(stop=self._halt)
             self.stats["mouse_moves"] += 1
             if not self._wait(random.uniform(self.cfg.mouse_min, self.cfg.mouse_max)):
                 return
@@ -456,13 +473,17 @@ class Bot:
                 name = os.path.basename(cfg.custom_file)
                 while True:
                     yield os.path.splitext(name)[0], [(name, content)]
+                    if not cfg.repeat:
+                        return
             except OSError as exc:
                 self.log(f"Can't read {cfg.custom_file}: {exc} - using projects instead")
         if cfg.source in ("projects", "file"):
             got_any = False
-            for job in project_cycle(cfg.projects):
+            for job in project_cycle(cfg.projects, repeat=cfg.repeat):
                 got_any = True
                 yield job
+            if got_any:
+                return
             if not got_any:
                 self.log("No projects found in ./projects - using snippets")
         n = 0
@@ -473,6 +494,8 @@ class Bot:
                 n += 1
                 files.append((f"snippet_{n:02d}.{SNIPPET_EXT.get(lang, 'txt')}", snippet))
             yield "sandbox", files
+            if not cfg.repeat:
+                return
 
     # --------------------------------------------------------------- typing
     def _char_delay(self, ch, base):
@@ -541,6 +564,8 @@ class Bot:
 
     def _review(self):
         """Arrow up a few lines as if re-reading, then come back."""
+        human.press_esc()  # close any suggestion popup, or the arrows would move in it
+        time.sleep(random.uniform(0.1, 0.3))
         k = random.randint(2, 8)
         for _ in range(k):
             if self._halt():
@@ -605,7 +630,11 @@ class Bot:
         return True
 
     def _type_loop(self):
+        first = True
         for project, files in self._jobs():
+            if not first and not self._wait(random.uniform(25, 60) * self.cfg.think):
+                return                       # break between projects
+            first = False
             if not self._gate():
                 return
             with self._act():
@@ -635,8 +664,10 @@ class Bot:
                 if not self._wait(random.uniform(6, 20) * self.cfg.think):   # between files
                     return
             self.log(f"Finished project {project}")
-            if not self._wait(random.uniform(25, 60) * self.cfg.think):
-                return
+        if not self._stop.is_set():
+            self.log("All done - every file has been written.")
+            self._stop.set()
+            self._run.set()
 
     # --------------------------------------------------------------- breaks
     def _break_loop(self):

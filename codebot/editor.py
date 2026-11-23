@@ -17,11 +17,16 @@ import time
 
 import pyautogui
 
+from . import human
+
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 MARKER = ".codebot"
 
 # Everything that would make VS Code insert or change text while we type.
+# Suggestions (IntelliSense / word completion) DO pop up while typing, like a real
+# editor, but nothing can accept them: Enter, Tab and commit characters ("(", "." ...)
+# are all switched off for accepting, so what gets typed is exactly the source.
 _EDITOR_CLEAN = {
     "editor.autoClosingBrackets": "never",
     "editor.autoClosingQuotes": "never",
@@ -34,15 +39,20 @@ _EDITOR_CLEAN = {
     "editor.formatOnSave": False,
     "editor.formatOnPaste": False,
     "editor.codeActionsOnSave": {},
-    "editor.quickSuggestions": {"other": "off", "comments": "off", "strings": "off"},
-    "editor.suggestOnTriggerCharacters": False,
+    # --- suggestions: shown, never accepted
+    "editor.quickSuggestions": {"other": "on", "comments": "off", "strings": "off"},
+    "editor.quickSuggestionsDelay": 10,
+    "editor.suggestOnTriggerCharacters": True,
+    "editor.wordBasedSuggestions": "matchingDocuments",
+    "editor.parameterHints.enabled": True,
     "editor.acceptSuggestionOnEnter": "off",
     "editor.acceptSuggestionOnCommitCharacter": False,
-    "editor.wordBasedSuggestions": "off",
-    "editor.snippetSuggestions": "none",
     "editor.tabCompletion": "off",
-    "editor.parameterHints.enabled": False,
+    "editor.snippetSuggestions": "none",
+    "editor.suggest.preview": False,
+    "editor.suggest.insertMode": "insert",
     "editor.inlineSuggest.enabled": False,
+    # ---
     "editor.linkedEditing": False,
     "editor.detectIndentation": False,
     "editor.insertSpaces": True,
@@ -64,19 +74,40 @@ WORKSPACE_SETTINGS = {
     "emmet.showExpandedAbbreviation": "never",
     "emmet.triggerExpansionOnTab": False,
     "python.analysis.autoIndent": False,
+    "python.analysis.autoFormatStrings": False,
     "github.copilot.enable": {"*": False},
     "github.copilot.editor.enableAutoCompletions": False,
     "files.autoSave": "afterDelay",
     "files.autoSaveDelay": 1500,
+    # --- just the editor + the file explorer: no terminal, chat, welcome pages, popups
     "workbench.editor.enablePreview": False,
     "workbench.startupEditor": "none",
-    "explorer.autoReveal": True,
-    "explorer.confirmDelete": False,
+    "workbench.tips.enabled": False,
+    "workbench.welcomePage.walkthroughs.openOnInstall": False,
+    "workbench.secondarySideBar.defaultVisibility": "hidden",
+    "workbench.sideBar.location": "left",
+    "chat.commandCenter.enabled": False,
+    "chat.disableAIFeatures": True,
+    "terminal.integrated.hideOnStartup": "always",
+    "terminal.integrated.enablePersistentSessions": False,
+    "terminal.integrated.persistentSessionReviveProcess": "never",
+    "task.allowAutomaticTasks": "off",
+    "npm.autoDetect": "off",
+    "python.terminal.activateEnvironment": False,
+    "python.createEnvironment.trigger": "off",
+    "go.toolsManagement.checkForUpdates": "off",
+    "go.survey.prompt": False,
+    "typescript.disableAutomaticTypeAcquisition": True,
+    "git.enabled": False,
     "git.openRepositoryInParentFolders": "never",
     "extensions.ignoreRecommendations": True,
+    "explorer.autoReveal": True,
+    "explorer.confirmDelete": False,
     "files.exclude": {"**/.codebot": True, ".vscode": True},
     "codebot.managed": True,
 }
+
+MOD = "command" if IS_MAC else "ctrl"
 
 
 def doc_end_keys():
@@ -226,6 +257,33 @@ class VSCodeEditor:
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(WORKSPACE_SETTINGS, fh, indent=2)
 
+    # ------------------------------------------------------------- layout
+    def _command(self, label):
+        """Run a VS Code command through the Command Palette."""
+        pyautogui.hotkey(MOD, "shift", "p")
+        time.sleep(0.7)
+        pyautogui.write(label, interval=0.03)
+        time.sleep(0.8)
+        pyautogui.press("enter")
+        time.sleep(0.5)
+        human.press_esc()   # closes the palette if the command didn't exist
+        time.sleep(0.3)
+
+    def focus_code(self):
+        """Keyboard focus into the code editor (never the terminal or explorer)."""
+        pyautogui.hotkey(MOD, "1")
+        time.sleep(0.25)
+
+    def tidy(self):
+        """Editor + file explorer only: hide terminal/panel, chat and other side bars."""
+        self.focus(force=True)
+        time.sleep(0.3)
+        self._command("View: Hide Panel")
+        self._command("View: Hide Secondary Side Bar")
+        pyautogui.hotkey(MOD, "shift", "e")   # show the file explorer on the left
+        time.sleep(0.6)
+        self.focus_code()
+
     # --------------------------------------------------------------- open
     def is_open(self):
         if IS_WIN:
@@ -241,6 +299,7 @@ class VSCodeEditor:
         self._write_settings()
         if self.is_open():
             self.focus(force=True)
+            self.tidy()
             return True
         self.log(f"Opening VS Code workspace {self.ws}")
         self._run_cli("-n", self.ws)
@@ -251,6 +310,7 @@ class VSCodeEditor:
                 break
         time.sleep(4 if not IS_WIN else 2.5)
         self.focus(force=True)
+        self.tidy()
         return True
 
     # -------------------------------------------------------------- focus
@@ -331,9 +391,9 @@ class VSCodeEditor:
 
     def begin_project(self, name):
         self.focus(force=True)
-        mod = "command" if IS_MAC else "ctrl"
-        pyautogui.hotkey(mod, "k")         # Close all editors (Ctrl+K Ctrl+W)
-        pyautogui.hotkey(mod, "w")
+        self.focus_code()
+        pyautogui.hotkey(MOD, "k")         # Close all editors (Ctrl+K Ctrl+W)
+        pyautogui.hotkey(MOD, "w")
         time.sleep(0.5)
         ours = self._ours()
         keep = [n for n in ours if n != name] if self.keep_finished else []
@@ -354,14 +414,15 @@ class VSCodeEditor:
         path = os.path.join(self.project_dir, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         open(path, "w", encoding="utf-8").close()
-        self._run_cli(path)
+        self._run_cli(path)                # VS Code opens it as a tab in the workspace window
         time.sleep(1.6)
         self.focus(force=True)
         time.sleep(0.3)
+        self.focus_code()
         return path
 
     def end_file(self, path, expected):
-        pyautogui.hotkey("command" if IS_MAC else "ctrl", "s")
+        pyautogui.hotkey(MOD, "s")
         time.sleep(1.0)
         try:
             with open(path, encoding="utf-8") as fh:

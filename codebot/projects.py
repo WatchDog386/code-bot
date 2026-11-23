@@ -74,10 +74,16 @@ def project_files(name):
     return out
 
 
-def project_cycle(selected=None):
-    """Yield (project_name, files) forever."""
+def project_cycle(selected=None, repeat=True):
+    """Yield (project_name, files): each chosen project once, or forever if repeat."""
     names = [n for n in (selected or []) if n in list_projects()] or list_projects()
     if not names:
+        return
+    if not repeat:
+        for name in names:
+            files = project_files(name)
+            if files:
+                yield name, files
         return
     last = None
     while True:

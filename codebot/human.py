@@ -19,6 +19,8 @@ BOUNDS = None
 # Last position the bot itself put the cursor at (used to notice when *you* move it).
 last_pos = None
 last_move_time = 0.0
+# when the bot itself last pressed Esc (so the Esc-Esc kill switch ignores it)
+last_bot_esc = 0.0
 # called when the cursor isn't where the bot left it mid-move (someone grabbed the mouse)
 on_interfere = None
 
@@ -33,6 +35,14 @@ def bounds():
         return BOUNDS
     w, h = pyautogui.size()
     return (0, 0, w, h)
+
+
+def press_esc():
+    """Esc pressed by the bot (closes a suggestion popup) - never counts as the kill switch."""
+    global last_bot_esc
+    last_bot_esc = time.time()
+    pyautogui.press("esc")
+    last_bot_esc = time.time()
 
 
 def _clamp(x, y):

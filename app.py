@@ -2,9 +2,9 @@
 """
 code-bot control panel, served at http://localhost:8765
 
-    python app.py                  # opens VS Code on your chosen screen + the dashboard
-    python app.py --autostart      # also starts the bot immediately
-    python app.py --port 9000 --no-browser --no-editor
+    python app.py                  # opens ONLY the dashboard. Pick a project, press Start.
+    python app.py --autostart      # starts the bot immediately with the saved settings
+    python app.py --port 9000 --no-browser
 
 Kill switch (anywhere): press Esc twice quickly. F9 = pause/resume.
 Emergency stop: shove the mouse into a corner of the screen.
@@ -110,7 +110,7 @@ def main():
     p = argparse.ArgumentParser(description="code-bot control panel")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true", help="don't open the dashboard")
-    p.add_argument("--no-editor", action="store_true", help="don't open Notepad on launch")
+    p.add_argument("--open-editor", action="store_true", help="open VS Code right away (default: only on Start)")
     p.add_argument("--autostart", action="store_true", help="start the bot right away")
     args = p.parse_args()
 
@@ -127,11 +127,12 @@ def main():
     print(f"  code-bot dashboard:  {url}")
     print("  Kill switch: press Esc TWICE quickly.  F9 = pause/resume" if hot else
           "  (install pynput for the Esc-Esc kill switch)")
+    print("  Pick a project in the dashboard and press Start - VS Code opens then.")
     print("  Use your mouse/keyboard any time - the bot pauses and waits for you")
     print("  Quit server: Ctrl+C")
     print("=" * 56, flush=True)
 
-    if not args.no_editor:
+    if args.open_editor:
         threading.Thread(target=lambda: bot.open_editor(load_settings()), daemon=True).start()
     if not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
