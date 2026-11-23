@@ -540,7 +540,8 @@ class Bot:
             else:
                 self.editor.focus(force=True)
             time.sleep(0.25)
-            pyautogui.hotkey(*doc_end_keys())
+            if self.editor.is_active() is not False:
+                pyautogui.hotkey(*doc_end_keys())
             time.sleep(0.15)
 
     # ------------------------------------------------------------ main loop
@@ -1027,11 +1028,14 @@ class Bot:
                         if not self._hands.is_set() or not self._check_click():
                             continue
                         self._refocus_if_needed()
+                        if pos == 0 and cfg.keep_focus and self.editor.kind != "focused":
+                            self.editor.focus()
+                        if not self._in_front():
+                            continue
                         if self._need_caret and self.editor.kind != "focused":
                             pyautogui.hotkey(*doc_end_keys())
                             self._need_caret = False
                         if pos == 0 and cfg.keep_focus and self.editor.kind != "focused":
-                            self.editor.focus()
                             pyautogui.hotkey(*doc_end_keys())  # caret back to end, whatever happened
                         self.activity = "typing"
                         pos = self._type_line(full, pos, indent, base)
@@ -1056,27 +1060,32 @@ class Bot:
                 continue
             if cfg.review_moves and self.editor.kind != "focused" and stripped and random.random() < 0.03:
                 with self._act():
-                    if not self._halt_keys():
+                    if not self._halt_keys() and self.editor.is_active() is not False:
                         self._review()
             elif random.random() < 0.02:
                 with self._act():
-                    if not self._halt_keys():
+                    if not self._halt_keys() and self.editor.is_active() is not False:
                         pyautogui.hotkey("command" if sys.platform == "darwin" else "ctrl", "s")
         return True
 
     # ----------------------------------------------------------- spreadsheets
     def _type_sheet(self, rows):
-        """Type a table into Excel: a cell, Tab, the next cell... Enter at the end of a row
-        (Excel goes back to column A). Then the header row is made bold."""
+        """Type a table into WPS / Excel like a data-entry clerk: each cell then Tab; at the end
+        of the row Home + Down to column A of the next row (the same in WPS and Excel, whatever
+        Enter does). The columns are already sized and the header frozen; the header is bolded
+        at the end. Steady rhythm: short gaps, a breather every 8-15 rows."""
         base = 60.0 / (self.cfg.wpm * 5)
         self.stats["lines_total"] = len(rows)
+        breather = random.randint(8, 15)
         for idx, row in enumerate(rows):
             if not self._gate_hands():
                 return False
-            self._energy = min(1.25, max(0.75, self._energy + random.uniform(-0.03, 0.03)))
-            pause = random.uniform(0.3, 1.6) * self.cfg.think if row else 0.3
-            self.activity = "thinking" if pause > 1.2 else "typing"
-            if not self._wait(pause):
+            if idx and idx % breather == 0:
+                breather = random.randint(8, 15)
+                self.activity = "thinking"
+                if not self._wait(random.uniform(1.5, 4.0) * self.cfg.think):
+                    return False
+            elif not self._wait(random.uniform(0.2, 0.6)):
                 return False
             with self._act():
                 if not self._hands.is_set():
@@ -1085,26 +1094,31 @@ class Bot:
                     self.editor.focus(force=True)
                     time.sleep(0.4)
                     if self.editor.is_active() is False:
-                        continue                         # Excel isn't in front: don't type anywhere
+                        self._lose_keys("The spreadsheet isn't the window in front")
+                        continue
                 self.activity = "typing"
-                for c, cell in enumerate(row):
-                    if cell:
-                        if self._type_text(str(cell), base / self._energy) is None:
+                for cell in row:
+                    text = str(cell)
+                    if text:
+                        if self._type_text(text, base) is None:
                             return False
-                        if not cell.startswith("=") and not re.fullmatch(r"-?[\d.,]+", cell):
-                            pyautogui.press("delete")       # drop any AutoComplete suggestion
-                    if c < len(row) - 1:
-                        pyautogui.press("tab")
-                        self.live["text"] += "\t"
-                        time.sleep(base * random.uniform(0.8, 2.0))
-                pyautogui.press("enter")
+                        if not text.startswith("=") and not re.fullmatch(r"-?[\d.,]+", text):
+                            pyautogui.press("delete")        # drop any AutoComplete suggestion
+                    if self.editor.is_active() is False:
+                        self._lose_keys("The spreadsheet isn't the window in front")
+                        return False
+                    pyautogui.press("tab")                   # commit the cell, next column
+                    self.live["text"] += text + "\t"
+                    time.sleep(base * random.uniform(1.0, 2.5))
+                pyautogui.press("home")                      # back to column A ...
+                pyautogui.press("down")                      # ... of the next row
                 self.live["text"] += "\n"
             self.stats["lines"] += 1
             self.stats["line"] = idx + 1
         with self._act():
             if self._hands.is_set() and self.editor.is_active() is not False:
                 pyautogui.hotkey("ctrl", "home")
-                pyautogui.hotkey("shift", "space")          # the header row
+                pyautogui.hotkey("shift", "space")           # the header row
                 pyautogui.hotkey("ctrl", "b")
                 time.sleep(0.3)
                 pyautogui.hotkey("ctrl", "home")
@@ -1177,7 +1191,7 @@ class Bot:
                     hands = self._hands.is_set()
                     # while you're busy: just create the file (VS Code's explorer shows it);
                     # its tab opens when the bot gets the keyboard back
-                    path = self.editor.begin_file(rel, show=hands)
+                    path = self.editor.begin_file(rel, show=hands, **({"rows": content} if isinstance(content, list) else {}))
                     self._cur_path = path
                     if hands:
                         self._bg_ready = False

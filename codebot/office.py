@@ -43,7 +43,22 @@ _WB_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>"""
 _SHEET = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"""
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">{views}{cols}<sheetData/></worksheet>"""
+_FREEZE = ('<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" '
+           'state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>')
+
+
+def column_widths(rows):
+    """A good width for every column, from what will be typed into it (formulas ~ 12)."""
+    widths = []
+    for row in rows:
+        for c, cell in enumerate(row):
+            text = str(cell)
+            size = 12 if text.startswith("=") else len(text)
+            while len(widths) <= c:
+                widths.append(8)
+            widths[c] = max(widths[c], min(45, size + 2))
+    return widths
 _STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
@@ -55,15 +70,20 @@ _STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </styleSheet>"""
 
 
-def blank_xlsx(path, sheet="Sheet1"):
-    """Write an empty, valid .xlsx workbook (no extra libraries needed)."""
+def blank_xlsx(path, sheet="Sheet1", rows=None):
+    """Write an empty, valid .xlsx workbook (no extra libraries needed). With `rows`, the
+    columns are already as wide as what will be typed, and the header row is frozen."""
+    cols = ""
+    if rows:
+        cols = "<cols>" + "".join(f'<col min="{i + 1}" max="{i + 1}" width="{w}" customWidth="1"/>'
+                                  for i, w in enumerate(column_widths(rows))) + "</cols>"
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", _CT)
         z.writestr("_rels/.rels", _RELS)
         z.writestr("xl/workbook.xml", _WB.format(name=sheet[:31].replace("&", "and")))
         z.writestr("xl/_rels/workbook.xml.rels", _WB_RELS)
-        z.writestr("xl/worksheets/sheet1.xml", _SHEET)
+        z.writestr("xl/worksheets/sheet1.xml", _SHEET.format(views=_FREEZE if rows else "", cols=cols))
         z.writestr("xl/styles.xml", _STYLES)
     return path
 
@@ -180,10 +200,10 @@ class OfficeEditor:
         self.project_dir = dest
         self.log(f"New spreadsheet project: {os.path.basename(dest)}")
 
-    def begin_file(self, rel, show=True):
+    def begin_file(self, rel, show=True, rows=None):
         path = os.path.join(self.project_dir, *rel.split("/"))
         title = os.path.splitext(os.path.basename(rel))[0].replace("-", " ").title()
-        blank_xlsx(path, sheet=title[:31])
+        blank_xlsx(path, sheet=title[:31], rows=rows)
         self.current = path
         self.open_file(path)
         return path
@@ -203,12 +223,19 @@ class OfficeEditor:
                 break
         time.sleep(2.0)
         self.focus(force=True)
-        pyautogui.hotkey("ctrl", "home")  # start at A1
+        time.sleep(0.4)
+        if self.is_active() is not False:
+            pyautogui.hotkey("ctrl", "home")  # start at A1
 
     def end_file(self, path, expected):
+        self.focus(force=True)
+        time.sleep(0.3)
+        if self.is_active() is False:
+            return None                   # not in front: never press keys elsewhere
         pyautogui.hotkey("command" if IS_MAC else "ctrl", "s")
         time.sleep(1.5)
-        pyautogui.press("enter")          # "keep this format?" prompts: keep the default
+        if self.is_active() is not False:
+            pyautogui.press("enter")      # a "keep this format?" prompt: Enter keeps xlsx
         time.sleep(0.5)
         return None
 

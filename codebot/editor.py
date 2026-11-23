@@ -376,27 +376,25 @@ class VSCodeEditor:
         shortcuts while you use the computer, or by extensions)."""
         for command in ("View: Reset Zoom", "View: Close Secondary Side Bar", "View: Close Panel",
                         "View: Close Primary Side Bar"):
-            self._palette(command, settle=0.5)
+            if not self._palette(command, settle=0.5):
+                return                      # VS Code isn't in front: skip, type nothing
             pyautogui.press("escape")       # close the palette if that command doesn't exist
 
     def clean_start(self):
         """Right after VS Code opens: close the files and terminals it restored from last
         time, the side bars and the panel - only if VS Code is really in front."""
-        self.focus(force=True)
-        time.sleep(0.6)
-        if self.is_active() is False:
+        if not self.in_front():
             return
         mod = "command" if IS_MAC else "ctrl"
         pyautogui.hotkey(mod, "k")
         pyautogui.hotkey(mod, "w")              # close all editors
         time.sleep(0.4)
-        self._palette("Terminal: Kill All Terminals", settle=0.5)
-        pyautogui.press("escape")
-        self.tidy()
+        if self._palette("Terminal: Kill All Terminals", settle=0.5):
+            pyautogui.press("escape")
+            self.tidy()
 
     def begin_project(self, name, interactive=True):
-        if interactive:
-            self.focus(force=True)
+        if interactive and self.in_front():
             mod = "command" if IS_MAC else "ctrl"
             pyautogui.hotkey(mod, "k")         # Close all editors (Ctrl+K Ctrl+W)
             pyautogui.hotkey(mod, "w")
@@ -434,8 +432,9 @@ class VSCodeEditor:
         time.sleep(0.3)
 
     def end_file(self, path, expected):
-        pyautogui.hotkey("command" if IS_MAC else "ctrl", "s")
-        time.sleep(1.0)
+        if self.in_front():
+            pyautogui.hotkey("command" if IS_MAC else "ctrl", "s")
+            time.sleep(1.0)
         return self.verify(path, expected)
 
     def verify(self, path, expected):
@@ -445,6 +444,14 @@ class VSCodeEditor:
         except OSError:
             return None
         return _norm(typed) == _norm(expected)
+
+    def in_front(self):
+        """Bring VS Code forward and confirm it really is the window that gets the keys."""
+        if self.is_active() is True:
+            return True
+        self.focus(force=True)
+        time.sleep(0.3)
+        return self.is_active() is not False
 
     def is_active(self):
         """Is the bot's VS Code window the one getting keystrokes? None = can't tell
@@ -461,15 +468,22 @@ class VSCodeEditor:
 
     def _palette(self, command, settle=1.0):
         """Run a VS Code command through the command palette, typed like a person."""
+        if not self.in_front():
+            return False                       # never send keys to another window
         mod = "command" if IS_MAC else "ctrl"
         pyautogui.hotkey(mod, "shift", "p")
         time.sleep(random.uniform(0.5, 0.9))
         for ch in command:
+            if self.is_active() is False:
+                return False
             pyautogui.write(ch)
             time.sleep(random.uniform(0.03, 0.09))
         time.sleep(random.uniform(0.4, 0.8))
+        if self.is_active() is False:
+            return False
         pyautogui.press("enter")
         time.sleep(settle)
+        return True
 
     def new_terminal(self):
         """Open a fresh integrated terminal (Ctrl+Shift+`) - starts in the workspace folder."""
