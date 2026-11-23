@@ -571,6 +571,13 @@
         <div class="chips" id="genDomains" style="gap:6px"></div>
       </div>
       <div class="panel" style="margin-bottom:20px">
+        <div class="panel-head"><h2>Data entry projects</h2><span class="muted">Opens WPS Office (or Excel) and enters the data and formulas cell by cell</span></div>
+        <table>
+          <thead><tr><th>Workbook</th><th>What gets entered</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody id="sheetTable"></tbody>
+        </table>
+      </div>
+      <div class="panel" style="margin-bottom:20px">
         <div class="panel-head"><h2>Excel work</h2>
           <label class="btn primary" style="cursor:pointer"><span data-i="external"></span>Upload Excel / CSV<input type="file" id="sheetUpload" accept=".xlsx,.csv" multiple hidden></label></div>
         <p class="muted" style="margin:0">Upload your own workbooks: the bot types them into WPS Office cell by cell (values and formulas), then the ready-made ones. Finished workbooks can be downloaded here (they're kept in memory, not saved on your PC).</p>
@@ -1003,6 +1010,7 @@ function readForm() {
     languages: [...document.querySelectorAll("#langs input:checked")].map((i) => i.value),
     gen_languages: [...document.querySelectorAll("#gen_langs input:checked")].map((i) => i.value),
     projects: [...document.querySelectorAll("#projects input:checked")].map((i) => i.value),
+    sheet_projects: sheetSel,
     custom_file: $("custom_file").value.trim(),
     editor: $("editor").value,
     source: $("source").value,
@@ -1047,6 +1055,7 @@ $("bothStart").onclick = () => { $("source").value = "both"; toggleBoxes(); sync
 async function loadSheets() {
   try {
     const r = await api("/api/sheets");
+    if (r.projects) { sheetProjects = r.projects; renderSheetTable(); }
     $("upList").innerHTML = r.uploads.map((n) => `<div class="prow"><span>${ic("chart")} ${esc(n)}</span><button class="link" data-del="${esc(n)}">Remove</button></div>`).join("")
       || '<div class="empty">Nothing uploaded yet</div>';
     $("resList").innerHTML = r.results.slice().reverse().map((x) => `<div class="prow"><span>${ic("file")} ${esc(x.name)}</span><a class="link" href="/api/results/${x.i}" download="${esc(x.name)}">Download</a></div>`).join("")
@@ -1062,12 +1071,30 @@ $("sheetUpload").onchange = async () => {
   $("sheetUpload").value = ""; loadSheets();
 };
 setInterval(() => { if (page === "projects") loadSheets(); }, 8000);
-$("sheetStart").onclick = () => { $("source").value = "spreadsheets"; toggleBoxes(); syncQuickProject(); saveSettings().then(() => { go("agent"); doStart(); }); };
+$("sheetStart").onclick = () => { sheetSel = []; renderSheetTable(); $("source").value = "spreadsheets"; toggleBoxes(); syncQuickProject(); saveSettings().then(() => { go("agent"); doStart(); }); };
 $("genStart").onclick = () => { $("source").value = "projects"; setSelectedProjects([]); toggleBoxes(); syncQuickProject(); saveSettings().then(() => { go("agent"); doStart(); }); };
 $("editor").addEventListener("change", toggleBoxes);
 document.querySelector('[data-page="behavior"]').addEventListener("change", (e) => {
   if (e.target.name === "mode") $("qMode").value = e.target.value;
   saveSettings();
+});
+
+/* ================================================================ data entry projects */
+let sheetProjects = [], sheetSel = [];
+function renderSheetTable() {
+  $("sheetTable").innerHTML = sheetProjects.map((p) => `<tr>
+      <td><div class="nm">${ic("chart")}${esc(p.title)}</div></td>
+      <td class="muted">${esc(p.desc)}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="btn sm primary" data-sheet="${esc(p.name)}">${ic("play")}${sheetSel.length === 1 && sheetSel[0] === p.name && lastStatus?.running ? "Running" : "Start"}</button></td></tr>`).join("")
+    || `<tr><td colspan="3" class="empty">No data entry projects</td></tr>`;
+}
+$("sheetTable").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-sheet]"); if (!b) return;
+  if (lastStatus?.running) { await api("/api/stop", {}); await new Promise((r) => setTimeout(r, 1500)); }
+  sheetSel = [b.dataset.sheet]; renderSheetTable();
+  $("source").value = "spreadsheets"; toggleBoxes(); syncQuickProject();
+  await saveSettings(); go("agent"); doStart();
 });
 
 /* ================================================================ projects page */
@@ -1662,6 +1689,7 @@ go(page);
 (async () => {
   const s = await api("/api/settings");
   languages = s.languages; projects = s.projects; monitors = s.monitors || [];
+  sheetProjects = s.sheet_projects || []; sheetSel = (s.config && s.config.sheet_projects) || []; renderSheetTable();
   generator = s.generator || generator;
   $("genDomains").innerHTML = Object.entries(generator.domains).map(([k, title]) => `<span class="pill" title="${esc(k)}">${esc(title)}</span>`).join("");
   $("browseProject").innerHTML = projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("");

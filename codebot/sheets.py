@@ -66,7 +66,7 @@ def sales(rng):
     regions = ["Nairobi", "Mombasa", "Kisumu", "Nakuru", "Eldoret", "Thika", "Nyeri", "Machakos"]
     products = ["Routers", "Cables", "Switches", "Laptops", "Phones", "Printers", "Monitors", "Keyboards"]
     rows = [["Date", "Region", "Product", "Sales rep", "Units", "Unit price", "Revenue", "Discount", "Net", "Target met"]]
-    n = rng.randint(30, 60)
+    n = rng.randint(60, 110)
     for i in range(2, n + 2):
         rows.append([f"2026-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}", rng.choice(regions), rng.choice(products),
                      person(rng), str(rng.randint(1, 120)), money(rng, 15, 950),
@@ -102,7 +102,7 @@ def payroll(rng):
     rows = [["Employee", "Department", "Basic pay", "Allowances", "Overtime hours", "Overtime pay", "Gross",
              "PAYE", "NSSF", "SHIF", "Net pay"]]
     depts = ["Sales", "Support", "Field", "Finance", "Store", "IT"]
-    n = rng.randint(15, 30)
+    n = rng.randint(30, 60)
     for i in range(2, n + 2):
         rows.append([person(rng), rng.choice(depts), f"{rng.randint(25, 180) * 1000}", f"{rng.randint(0, 25) * 1000}",
                      str(rng.randint(0, 30)), f"=E{i}*C{i}/176*1.5", f"=C{i}+D{i}+F{i}",
@@ -119,7 +119,7 @@ def payroll(rng):
 def grades(rng):
     subjects = ["Maths", "English", "Kiswahili", "Biology", "Chemistry", "Physics", "History", "Computer"]
     rows = [["Student"] + subjects + ["Total", "Average", "Grade", "Rank"]]
-    n = rng.randint(20, 40)
+    n = rng.randint(35, 55)
     last = col(len(subjects))
     for i in range(2, n + 2):
         tot, avg = col(len(subjects) + 1), col(len(subjects) + 2)
@@ -134,7 +134,7 @@ def grades(rng):
 def expenses(rng):
     cats = ["Fuel", "Meals", "Airtime", "Accommodation", "Parking", "Tools", "Office", "Client visit"]
     rows = [["Date", "Description", "Category", "Paid by", "Amount", "VAT", "Total", "Approved"]]
-    n = rng.randint(25, 50)
+    n = rng.randint(50, 90)
     for i in range(2, n + 2):
         cat = rng.choice(cats)
         rows.append([f"2026-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}", f"{cat} - {rng.choice(['site', 'office', 'client', 'trip'])}",
@@ -164,7 +164,61 @@ def tracker(rng):
     return "project-tracker", "Project Tracker", rows
 
 
-MAKERS = [budget, sales, inventory, payroll, grades, expenses, tracker]
+def customers(rng):
+    counties = ["Nairobi", "Mombasa", "Kisumu", "Nakuru", "Kiambu", "Machakos", "Uasin Gishu", "Nyeri"]
+    plans = [("Home 10 Mbps", 2500), ("Home 20 Mbps", 3500), ("Home 50 Mbps", 5500), ("Business 100 Mbps", 12000)]
+    rows = [["Account", "Customer", "Phone", "Email", "County", "Plan", "Monthly fee", "Months active",
+             "Total billed", "Paid", "Balance", "Status"]]
+    n = rng.randint(60, 100)
+    for i in range(2, n + 2):
+        name = person(rng)
+        plan, fee = rng.choice(plans)
+        months = rng.randint(1, 24)
+        paid = fee * months - rng.choice([0, 0, 0, fee, fee * 2])
+        rows.append([f"ACC-{20000 + i * 13}", name, f"07{rng.randint(10, 99)} {rng.randint(100, 999)} {rng.randint(100, 999)}",
+                     name.lower().replace(" ", ".") + "@mail.com", rng.choice(counties), plan, str(fee), str(months),
+                     f"=G{i}*H{i}", str(paid), f"=I{i}-J{i}", f'=IF(K{i}>0,"Owes","Paid up")'])
+    rows.append(["", "Total", "", "", "", "", f"=AVERAGE(G2:G{n + 1})", f"=SUM(H2:H{n + 1})", f"=SUM(I2:I{n + 1})",
+                 f"=SUM(J2:J{n + 1})", f"=SUM(K2:K{n + 1})", f'=COUNTIF(L2:L{n + 1},"Owes")'])
+    rows.append([])
+    rows.append(["County", "Customers", "Billed", "Outstanding"])
+    for k, c in enumerate(counties, start=n + 5):
+        rows.append([c, f'=COUNTIF(E2:E{n + 1},A{k})', f'=SUMIF(E2:E{n + 1},A{k},I2:I{n + 1})',
+                     f'=SUMIF(E2:E{n + 1},A{k},K2:K{n + 1})'])
+    return "customer-register", "Customer Register", rows
+
+
+MAKERS = [budget, sales, inventory, payroll, grades, expenses, tracker, customers]
+
+# The data entry projects you can pick in the dashboard (fresh data every time)
+CATALOG = {
+    "monthly-budget": ("Monthly Budget", budget, "12 months of costs per category, totals, averages, shares"),
+    "sales-report": ("Sales Report", sales, "Sales entries with revenue, discount, net and a region summary"),
+    "inventory-valuation": ("Inventory Valuation", inventory, "Stock in/out, closing stock, value and reorder status"),
+    "payroll": ("Payroll", payroll, "Staff pay with overtime, PAYE, NSSF, SHIF, net pay per department"),
+    "class-results": ("Class Results", grades, "Marks per subject with totals, averages, grades and ranks"),
+    "expense-claims": ("Expense Claims", expenses, "Expense entries with VAT, approvals and a category summary"),
+    "project-tracker": ("Project Tracker", tracker, "Tasks with dates, progress, budget vs spent and status"),
+    "customer-register": ("Customer Register", customers, "Customer records with plans, billing, balances per county"),
+}
+
+
+def list_sheet_projects():
+    """[{name, title, desc}] - the ready-made ones plus your uploads."""
+    out = [{"name": k, "title": t, "desc": d} for k, (t, _, d) in CATALOG.items()]
+    for f in uploaded():
+        out.append({"name": "upload:" + f, "title": os.path.splitext(f)[0], "desc": "Your uploaded workbook"})
+    return out
+
+
+def sheet_project(name, rng=None):
+    """One data entry project by its name (fresh random data for the ready-made ones)."""
+    if name.startswith("upload:"):
+        return uploaded_project(name[len("upload:"):])
+    title, make, _ = CATALOG[name]
+    slug, title, rows = make(rng or random.Random())
+    return {"name": slug, "title": title, "kind": "sheet", "files": [(f"{slug}.xlsx", rows)], "scaffold": [],
+            "steps": [], "language": "spreadsheet", "records": [title]}
 
 
 def generate(seed=None, count=None):
@@ -258,9 +312,20 @@ def uploaded_project(name):
             "records": [name]}
 
 
-def sheets_cycle(seed=None):
-    """Forever: your uploaded workbooks first (each in turn), then a ready-made one, and round again."""
+def sheets_cycle(seed=None, selected=None):
+    """Forever. With `selected` (names from list_sheet_projects): just those, in turn, with fresh
+    data each round. Otherwise: your uploaded workbooks first, then a ready-made one, and round again."""
     rng = random.Random(seed)
+    valid = {p["name"] for p in list_sheet_projects()}
+    chosen = [n for n in (selected or []) if n in valid]
+    while chosen:
+        for name in chosen:
+            try:
+                project = sheet_project(name, random.Random(rng.random()))
+            except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError, KeyError):
+                continue
+            if project["files"][0][1]:
+                yield project
     while True:
         for name in uploaded():
             try:

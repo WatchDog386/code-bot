@@ -59,6 +59,7 @@ class Config:
     source: str = "projects"           # both (code + spreadsheets) | projects | spreadsheets | mixed | generated | snippets | file
     gen_languages: list = field(default_factory=lambda: ["python", "go", "typescript"])
     projects: list = field(default_factory=list)   # empty = all
+    sheet_projects: list = field(default_factory=list)   # data entry projects to type (empty = all)
     workspace_dir: str = "~/dev-projects"
     keep_finished: bool = False        # False = workspace only ever holds the current project
     languages: list = field(default_factory=lambda: list(LANGUAGES))
@@ -80,7 +81,7 @@ class Config:
     terminal_after_project: bool = False   # off = only type the code in the editor (no terminal at all)
     serve_seconds: float = 45          # how long a started app is left running (and shown) before Ctrl+C
     terminal_timeout: float = 300      # seconds before a background command is stopped
-    resume_after: float = 5.0          # keyboard: take it back after this many idle seconds (0 = never)
+    resume_after: float = 2.0          # keyboard: take it back after this many idle seconds (0 = never)
     clear_after_lines: int = 150       # Notepad only: wipe scratch every N lines
     auto_open_editor: bool = True
     keep_focus: bool = True
@@ -104,6 +105,8 @@ class Config:
         c.minutes = max(0.0, float(c.minutes))
         c.start_delay = max(0.0, float(c.start_delay))
         c.resume_after = max(0.0, float(c.resume_after))
+        if c.resume_after == 5.0:      # the old default: take back sooner now
+            c.resume_after = 2.0
         c.terminal_timeout = max(10.0, float(c.terminal_timeout))
         c.daily_hours = max(0.0, min(24.0, float(c.daily_hours)))
         try:
@@ -215,9 +218,12 @@ class Bot:
         return self.running and self.state == "you" and not self._hands.is_set()
 
     def _can_background(self):
-        # always real, human typing: when you take the keyboard the bot simply waits and then
-        # carries on typing itself (no filling the file in behind your back)
-        return False
+        # VS Code: while you work in another window the code never stops - it keeps being
+        # written into the open file (VS Code shows it growing) at the same human pace, and
+        # real keystrokes take over again the moment you leave the computer alone.
+        # (Spreadsheets can't be written behind an open WPS/Excel window: those wait.)
+        return (self.cfg.background_typing and self.editor is not None
+                and self.editor.kind == "vscode" and bool(self._cur_path))
 
     def _gate_mouse(self):
         while self._gate() and not self._mouse.is_set():
@@ -531,7 +537,7 @@ class Bot:
 
     def _check_auto_resume(self):
         now = time.time()
-        if (not self._mouse.is_set() and self._run.is_set() and self.state in ("running", "you")
+        if (not self._mouse.is_set() and self.state in ("running", "you")
                 and now - self._last_mouse >= self.cfg.mouse_resume):
             self._mouse.set()   # you stopped moving the mouse: the bot takes it right back
         if (self.state == "you" and self.cfg.resume_after and not self._user_paused
@@ -764,7 +770,7 @@ class Bot:
         cfg = self.cfg
         if cfg.source == "spreadsheets":
             from .sheets import sheets_cycle
-            for p in sheets_cycle():
+            for p in sheets_cycle(selected=cfg.sheet_projects):
                 self.log(f"New spreadsheet project: {p['title']}")
                 yield p["name"], p["files"], p
             return

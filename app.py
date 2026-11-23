@@ -23,6 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 try:
     from codebot.engine import Bot, Config, monitors_info
     from codebot.projects import list_projects, project_files
+    from codebot.sheets import list_sheet_projects
     from codebot.snippets import LANGUAGES
     from codebot.gen import LANGUAGES as GEN_LANGUAGES
     from codebot.gen.schema import DOMAINS as GEN_DOMAINS
@@ -106,7 +107,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, data, "image/jpeg")
         if url.path == "/api/sheets":
             from codebot.sheets import uploaded
-            return self._send(200, {"uploads": uploaded(), "results": [
+            return self._send(200, {"uploads": uploaded(), "projects": list_sheet_projects(), "results": [
                 {"i": i, "name": r["name"], "project": r["project"], "t": r["t"], "size": len(r["data"])}
                 for i, r in enumerate(bot.results)]})
         if url.path.startswith("/api/results/"):
@@ -177,7 +178,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"config": asdict(load_settings()), "languages": LANGUAGES,
                                     "generator": {"languages": list(GEN_LANGUAGES),
                                                   "domains": {k: v[0] for k, v in GEN_DOMAINS.items()}},
-                                    "projects": list_projects(), "monitors": monitors_info()})
+                                    "projects": list_projects(), "sheet_projects": list_sheet_projects(),
+                                    "monitors": monitors_info()})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
