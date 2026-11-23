@@ -18,6 +18,8 @@ import time
 
 import pyautogui
 
+from . import human
+
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 MARKER = ".codebot"
@@ -35,14 +37,18 @@ _EDITOR_CLEAN = {
     "editor.formatOnSave": False,
     "editor.formatOnPaste": False,
     "editor.codeActionsOnSave": {},
-    "editor.quickSuggestions": {"other": "off", "comments": "off", "strings": "off"},
-    "editor.suggestOnTriggerCharacters": False,
+    # autocomplete pops up while typing (looks real) but can never be accepted:
+    # Enter, Tab and commit characters like ( . ; don't accept a suggestion
+    "editor.quickSuggestions": {"other": "on", "comments": "off", "strings": "off"},
+    "editor.quickSuggestionsDelay": 10,
+    "editor.suggestOnTriggerCharacters": True,
+    "editor.wordBasedSuggestions": "matchingDocuments",
+    "editor.parameterHints.enabled": True,
     "editor.acceptSuggestionOnEnter": "off",
     "editor.acceptSuggestionOnCommitCharacter": False,
-    "editor.wordBasedSuggestions": "off",
-    "editor.snippetSuggestions": "none",
     "editor.tabCompletion": "off",
-    "editor.parameterHints.enabled": False,
+    "editor.snippetSuggestions": "none",
+    "editor.suggest.preview": False,
     "editor.inlineSuggest.enabled": False,
     "editor.linkedEditing": False,
     "editor.detectIndentation": False,
@@ -65,13 +71,20 @@ WORKSPACE_SETTINGS = {
     "emmet.showExpandedAbbreviation": "never",
     "emmet.triggerExpansionOnTab": False,
     "python.analysis.autoIndent": False,
+    "python.analysis.autoFormatStrings": False,
     "github.copilot.enable": {"*": False},
     "github.copilot.editor.enableAutoCompletions": False,
     "files.autoSave": "afterDelay",
     "files.autoSaveDelay": 1500,
     "workbench.editor.enablePreview": False,
     "workbench.startupEditor": "none",
-    "explorer.autoReveal": False,           # don't keep expanding folders in the explorer
+    "explorer.autoReveal": True,            # each new file shows up highlighted in the explorer
+    "workbench.sideBar.location": "left",
+    "chat.disableAIFeatures": True,         # no Copilot chat panel popping open
+    "python.terminal.activateEnvironment": False,   # extensions must not open terminals
+    "python.createEnvironment.trigger": "off",
+    "task.allowAutomaticTasks": "off",
+    "npm.autoDetect": "off",
     "terminal.integrated.enablePersistentSessions": False,   # no old terminals / "History restored"
     "terminal.integrated.persistentSessionReviveProcess": "never",
     "terminal.integrated.hideOnStartup": "always",
@@ -372,12 +385,13 @@ class VSCodeEditor:
         self._save_manifest([n for n in ours if n in keep and os.path.isdir(os.path.join(self.ws, n))])
 
     def tidy(self):
-        """Just the code: normal zoom, no side bars, no panel (they can be opened by stray
-        shortcuts while you use the computer, or by extensions)."""
-        for command in ("View: Reset Zoom", "View: Close Secondary Side Bar", "View: Close Panel",
-                        "View: Close Primary Side Bar"):
+        """The code + the file explorer on the left, nothing else: normal zoom, no terminal
+        panel, no chat/secondary side bar. Then the keyboard goes back into the code."""
+        for command in ("View: Reset Zoom", "View: Hide Secondary Side Bar", "View: Hide Panel",
+                        "View: Show Explorer"):
             self._palette(command, settle=0.5)
-            pyautogui.press("escape")       # close the palette if that command doesn't exist
+            human.press_esc()               # close the palette if that command doesn't exist
+        self.focus_editor()
 
     def clean_start(self):
         """Right after VS Code opens: close the files and terminals it restored from last
@@ -391,7 +405,7 @@ class VSCodeEditor:
         pyautogui.hotkey(mod, "w")              # close all editors
         time.sleep(0.4)
         self._palette("Terminal: Kill All Terminals", settle=0.5)
-        pyautogui.press("escape")
+        human.press_esc()
         self.tidy()
 
     def begin_project(self, name, interactive=True):
@@ -432,6 +446,8 @@ class VSCodeEditor:
         time.sleep(1.6)
         self.focus(force=True)
         time.sleep(0.3)
+        if self.is_active() is not False:
+            self.focus_editor()
 
     def end_file(self, path, expected):
         pyautogui.hotkey("command" if IS_MAC else "ctrl", "s")
@@ -531,7 +547,9 @@ class VSCodeEditor:
             self._palette("View: Move Editor into Next Group", settle=1.5)
 
     def focus_editor(self):
-        self._palette("View: Focus Active Editor Group", settle=0.6)
+        """Keyboard into the code editor (never the explorer or a terminal)."""
+        pyautogui.hotkey("command" if IS_MAC else "ctrl", "1")
+        time.sleep(0.3)
 
     def clear(self):
         pass

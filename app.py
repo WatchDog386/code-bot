@@ -2,9 +2,10 @@
 """
 Invotech 360 control panel, served at http://localhost:8765
 
-    python app.py                  # opens VS Code on your chosen screen + the dashboard
+    python app.py                  # opens ONLY the dashboard: pick a project, press Start
     python app.py --autostart      # also starts the bot immediately
-    python app.py --port 9000 --no-browser --no-editor
+    python app.py --open-editor    # also opens VS Code right away
+    python app.py --port 9000 --no-browser
 
 Kill switch (anywhere): press Esc twice quickly. F9 = pause/resume.
 It never stops on its own: only Esc Esc, Stop, or the time limit end a run.
@@ -264,7 +265,9 @@ def main():
     p = argparse.ArgumentParser(description="Invotech 360 control panel")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true", help="don't open the dashboard")
-    p.add_argument("--no-editor", action="store_true", help="don't open Notepad on launch")
+    p.add_argument("--no-editor", action="store_true", help=argparse.SUPPRESS)   # old flag, now the default
+    p.add_argument("--open-editor", action="store_true",
+                   help="open VS Code right away (default: it opens when you press Start)")
     p.add_argument("--autostart", action="store_true", help="start the bot right away")
     p.add_argument("--background", action="store_true",
                    help="started at login / by the 3 AM task: no browser, no editor; the schedule decides")
@@ -299,10 +302,16 @@ def main():
         print(f"  Schedule: every day from {cfg.schedule_start}, up to {cfg.daily_hours:g} hours "
               f"({st['used_text']} used today; next start: {st['next_start_text']})", flush=True)
     if not args.no_schedule:
+        if not args.background:
+            # opened by hand: just the dashboard - you pick the project and press Start.
+            # The schedule takes over again from its next start time.
+            from codebot.schedule import day_key
+            scheduler.held_day = day_key(scheduler.now(), cfg)
         scheduler.run_forever()
     if args.background:
-        args.no_editor = args.no_browser = True
-    if not args.no_editor:
+        args.no_browser = True
+        args.open_editor = False
+    if args.open_editor:
         threading.Thread(target=lambda: bot.open_editor(load_settings()), daemon=True).start()
     if not args.no_browser:
         threading.Timer(1.0, lambda: open_dashboard(url)).start()

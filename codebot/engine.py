@@ -56,7 +56,7 @@ LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 @dataclass
 class Config:
     editor: str = "vscode"             # vscode | notepad | focused
-    source: str = "both"               # both (code + spreadsheets) | projects | spreadsheets | mixed | generated | snippets | file
+    source: str = "projects"           # both (code + spreadsheets) | projects | spreadsheets | mixed | generated | snippets | file
     gen_languages: list = field(default_factory=lambda: ["python", "go", "typescript"])
     projects: list = field(default_factory=list)   # empty = all
     workspace_dir: str = "~/dev-projects"
@@ -301,7 +301,20 @@ class Bot:
         if ok and hasattr(self.editor, "clean_start"):
             with self._act():
                 self.editor.clean_start()       # no old files, terminals or side bars
+        self._confine_mouse()
         return ok
+
+    def _confine_mouse(self):
+        """The bot's mouse only ever moves inside the editor's window (VS Code / WPS),
+        never over the rest of the screen."""
+        if self.editor is None or self.editor.kind == "focused":
+            return
+        try:
+            l, t, w, h = self.editor.region()
+        except Exception:  # noqa: BLE001
+            return
+        if w > 200 and h > 200:
+            human.set_bounds((l, t, w, h))
 
     # ------------------------------------------------------------- controls
     def start(self, cfg_dict=None):
@@ -409,6 +422,8 @@ class Bot:
                 injected = None
             if key == keyboard.Key.esc:
                 now = time.time()
+                if now - human.last_bot_esc < 0.5:
+                    return   # the bot closing a suggestion popup / the palette, not you
                 if now - self._last_esc < DOUBLE_ESC_WINDOW:
                     self._last_esc = 0
                     if self.running:
@@ -629,6 +644,7 @@ class Bot:
             with self._act():                     # one sender at a time (X11 isn't thread-safe)
                 if self._halt():
                     continue
+                self._confine_mouse()             # follow the window if it moved
                 layout = None
                 if self.editor is not None and self.editor.kind == "vscode" and hasattr(self.editor, "layout"):
                     try:
@@ -954,6 +970,8 @@ class Bot:
 
     def _review(self):
         """Arrow up a few lines as if re-reading, then come back."""
+        human.press_esc()   # close an autocomplete popup first, or the arrows would move in it
+        time.sleep(random.uniform(0.1, 0.3))
         k = random.randint(2, 8)
         for _ in range(k):
             if self._halt_keys():
