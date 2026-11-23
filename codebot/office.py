@@ -55,9 +55,64 @@ _STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </styleSheet>"""
 
 
-def blank_xlsx(path, sheet="Sheet1", sheets=None):
-    """An empty .xlsx with one sheet per name in `sheets` (or just `sheet`)."""
+_NUMFMT = {"gen": 0, "money": 4, "int": 3, "pct": 165, "date": 164, "dec": 166}
+
+
+def _styles(keys):
+    """styles.xml with one cell format per (fmt, role) in `keys`; returns (xml, {key: index})."""
+    xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>']
+    index = {}
+    for fmt, role in keys:
+        font, fill, border = {"head": (1, 2, 1), "total": (1, 0, 2)}.get(role, (0, 0, 0))
+        xfs.append(f'<xf numFmtId="{_NUMFMT[fmt]}" fontId="{font}" fillId="{fill}" borderId="{border}" xfId="0" '
+                   'applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>')
+        index[(fmt, role)] = len(xfs) - 1
+    xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+           '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+           '<numFmts count="3"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/>'
+           '<numFmt numFmtId="165" formatCode="0.0%"/><numFmt numFmtId="166" formatCode="0.0"/></numFmts>'
+           '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font>'
+           '<font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+           '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+           '<fill><patternFill patternType="solid"><fgColor rgb="FFDDEBF7"/><bgColor indexed="64"/></patternFill></fill></fills>'
+           '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border>'
+           '<border><left/><right/><top/><bottom style="thin"><color rgb="FF8EA9DB"/></bottom><diagonal/></border>'
+           '<border><left/><right/><top style="thin"><color auto="1"/></top><bottom/><diagonal/></border></borders>'
+           '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+           f'<cellXfs count="{len(xfs)}">' + "".join(xfs) + '</cellXfs>'
+           '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
+    return xml, index
+
+
+def _sheet_xml(look, index):
+    from .sheets import col
+    if not look:
+        return _SHEET
+    cols = "".join(f'<col min="{c + 1}" max="{c + 1}" width="{w}" customWidth="1"/>'
+                   for c, w in sorted(look["widths"].items()))
+    by_row = {}
+    for (r, c), key in look["cells"].items():
+        by_row.setdefault(r, []).append((c, index[key]))
+    rows = "".join(f'<row r="{r + 1}">' + "".join(f'<c r="{col(c)}{r + 1}" s="{s}"/>' for c, s in sorted(cells)) + "</row>"
+                   for r, cells in sorted(by_row.items()))
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>'
+            + (f"<cols>{cols}</cols>" if cols else "") + f"<sheetData>{rows}</sheetData></worksheet>")
+
+
+def blank_xlsx(path, sheet="Sheet1", sheets=None, book=None):
+    """An empty .xlsx with one sheet per name in `sheets` (or just `sheet`). With `book` (the rows
+    the bot will type) every sheet is laid out in advance: column widths, number formats
+    (money, %, dates), a styled header row per table and bold total rows."""
+    looks = {}
+    if book:
+        from .books import sheet_looks
+        looks = sheet_looks(book, default=sheet)
+        sheets = list(looks)
     names = [n.replace("&", "and")[:31] for n in (sheets or [sheet])]
+    keys = sorted({k for lk in looks.values() for k in lk["cells"].values()})
+    styles_xml, index = _styles(keys)
     ct = _CT.replace('<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
                      "".join(f'<Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
                              for i in range(1, len(names) + 1)))
@@ -78,9 +133,9 @@ def blank_xlsx(path, sheet="Sheet1", sheets=None):
         z.writestr("_rels/.rels", _RELS)
         z.writestr("xl/workbook.xml", wb)
         z.writestr("xl/_rels/workbook.xml.rels", rels)
-        for i in range(1, len(names) + 1):
-            z.writestr(f"xl/worksheets/sheet{i}.xml", _SHEET)
-        z.writestr("xl/styles.xml", _STYLES)
+        for i, n in enumerate(names, 1):
+            z.writestr(f"xl/worksheets/sheet{i}.xml", _sheet_xml(looks.get(n), index))
+        z.writestr("xl/styles.xml", styles_xml)
     return path
 
 
@@ -212,8 +267,8 @@ class OfficeEditor:
     def begin_file(self, rel, show=True):
         path = os.path.join(self.project_dir, *rel.split("/"))
         title = os.path.splitext(os.path.basename(rel))[0].replace("-", " ").title()
-        blank_xlsx(path, sheet=title[:31], sheets=getattr(self, "next_sheets", None) or None)
-        self.next_sheets = None
+        blank_xlsx(path, sheet=title[:31], book=getattr(self, "next_book", None) or None)
+        self.next_book = None
         self.current = path
         self.open_file(path)
         return path

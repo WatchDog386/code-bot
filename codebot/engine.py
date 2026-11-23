@@ -882,6 +882,7 @@ class Bot:
         """Type with real keystrokes. Returns how many characters were typed (fewer if you
         took the keyboard mid-way), or None if the bot was stopped."""
         cfg = self.cfg
+        self._caps_off()
         i = 0
         while i < len(text):
             if self._stop.is_set():
@@ -904,6 +905,19 @@ class Bot:
                 self._lose_keys("VS Code isn't the window in front")
                 return i
             ch = text[i]
+            if (self.editor is not None and self.editor.kind == "vscode" and ch.isalpha()
+                    and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_"))):
+                word = re.match(r"[A-Za-z_][A-Za-z0-9_]*", text[i:]).group(0)
+                if len(word) >= 5 and random.random() < 0.015:
+                    wrong = self._mangle(word)
+                    for wch in wrong:                       # types the word wrong...
+                        pyautogui.write(wch)
+                        time.sleep(self._char_delay(wch, base))
+                    time.sleep(random.uniform(0.4, 1.4))
+                    human.press_esc()                       # (close the suggestion popup)
+                    pyautogui.hotkey("ctrl", "backspace")   # ...deletes it and types it properly
+                    time.sleep(random.uniform(0.3, 0.9))
+                    self.stats["typos"] += 1
             if cfg.typo_rate and i > 0 and ch.lower() in NEIGHBORS and random.random() < cfg.typo_rate:
                 wrong = random.choice(NEIGHBORS[ch.lower()])
                 pyautogui.write(wrong.upper() if ch.isupper() else wrong)
@@ -1016,6 +1030,20 @@ class Bot:
             pos += n
             if pos < body_end:
                 return pos
+        stripped = full[indent:body_end]
+        if (pos >= body_end and self.editor is not None and self.editor.kind == "vscode"
+                and len(stripped) >= 12 and getattr(self, "_rewritten", None) != full
+                and self._hands.is_set() and random.random() < 0.01):
+            # not happy with that line: select it back to the indent, delete, think, rewrite
+            self._rewritten = full
+            human.press_esc()
+            pyautogui.hotkey("shift", "home")
+            time.sleep(random.uniform(0.4, 1.0))
+            pyautogui.press("backspace")
+            self.live["text"] = self.live["text"][:-len(stripped)]
+            self.event("edit", "Rewrote a line", stripped[:60])
+            time.sleep(random.uniform(1.0, 3.0) * self.cfg.think)
+            return indent
         if pos < len(full) and self._hands.is_set() and self._in_front():
             pyautogui.press("enter")
             self.live["text"] += "\n"
@@ -1095,11 +1123,56 @@ class Bot:
 
     # ----------------------------------------------------------- spreadsheets
     def _bold_header(self):
+        # the header row is already styled in the workbook (bold, shaded): just go back to A1
+        # (Ctrl+B here would switch the bold OFF again)
         pyautogui.hotkey("ctrl", "home")
-        pyautogui.hotkey("shift", "space")          # the header row
-        pyautogui.hotkey("ctrl", "b")
         time.sleep(0.3)
-        pyautogui.hotkey("ctrl", "home")
+
+    @staticmethod
+    def _caps_off():
+        """Caps Lock on turns every letter the wrong way round (cODE, sumif): switch it off."""
+        if not IS_WIN:
+            return
+        try:
+            import ctypes
+            if ctypes.windll.user32.GetKeyState(0x14) & 1:
+                pyautogui.press("capslock")
+                time.sleep(0.05)
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _mangle(text):
+        """A believable slip for `text`: two letters swapped, a digit off by one, a letter dropped."""
+        if re.fullmatch(r"-?[\d.,]+", text):
+            idx = [i for i, ch in enumerate(text) if ch.isdigit()]
+            i = random.choice(idx)
+            d = int(text[i])
+            return text[:i] + str((d + random.choice([1, -1])) % 10) + text[i + 1:]
+        if len(text) >= 4 and random.random() < 0.6:
+            i = random.randint(1, len(text) - 2)
+            return text[:i] + text[i + 1] + text[i] + text[i + 2:]
+        i = random.randint(1, len(text) - 1)
+        return text[:i] + text[i + 1:]
+
+    def _cell_slip(self, cell, base):
+        """Excel: enter a wrong value, Tab on, notice it, Shift+Tab back and put it right
+        (sometimes clearing the cell with Delete first). Ends on that cell, ready to retype."""
+        wrong = self._mangle(cell)
+        if wrong == cell:
+            return
+        for ch in wrong:
+            pyautogui.write(ch)
+            time.sleep(self._char_delay(ch, base))
+        pyautogui.press("tab")
+        time.sleep(random.uniform(0.6, 2.5) * self.cfg.think)      # ...wait, that's wrong
+        pyautogui.hotkey("shift", "tab")
+        time.sleep(random.uniform(0.3, 0.8))
+        if random.random() < 0.5:
+            pyautogui.press("delete")
+            time.sleep(random.uniform(0.3, 0.9))
+        self.stats["typos"] += 1
+        self.event("edit", "Corrected a cell", f"{wrong} -> {cell}")
 
     def _sheet_ready(self):
         """True when the bot may type into the spreadsheet right now (WPS/Excel in front)."""
@@ -1161,6 +1234,9 @@ class Bot:
                         self.activity = "typing"
                         while c < len(row):
                             cell = str(row[c] or "")
+                            if (off == 0 and c < len(row) - 1 and len(cell) >= 3 and not cell.startswith("=")
+                                    and random.random() < 0.025):
+                                self._cell_slip(cell, base / self._energy)
                             if off < len(cell):
                                 n = self._type_text(cell[off:], base / self._energy)
                                 if n is None:
@@ -1259,8 +1335,7 @@ class Bot:
                 self.stats.update(file=rel, file_index=i, line=0)
                 self.live.update(file=rel, text="")
                 if isinstance(content, list) and self.editor.kind == "office":
-                    from .books import sheet_names
-                    self.editor.next_sheets = sheet_names(content)   # the workbook gets all its sheet tabs
+                    self.editor.next_book = content   # the workbook gets its sheet tabs, widths and formats
                 self.event("create", f"Created {rel}", f"{len(content)} rows" if isinstance(content, list)
                            else f"{content.count(chr(10)) + 1} lines")
                 self.log(f"Writing {project}/{rel}")

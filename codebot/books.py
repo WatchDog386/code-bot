@@ -18,7 +18,8 @@ DEPTS = ["Sales", "Support", "Field", "Finance", "Store", "IT"]
 
 
 def ref(sheet, cell):
-    return f"'{sheet}'!{cell}"
+    """Sheet reference as a person writes it: Q1!C:C, quotes only when the name has a space."""
+    return (f"'{sheet}'!{cell}" if " " in sheet else f"{sheet}!{cell}")
 
 
 def rng_rows(rng, lo, hi):
@@ -43,14 +44,11 @@ def sales_book(rng):
                 ("P-111", "Keyboard + mouse", "Office", 2800), ("P-112", "UPS 1kVA", "Power", 12500),
                 ("P-113", "Solar kit 200W", "Power", 39000), ("P-114", "Access point", "Networking", 9800)]
     reps = sorted({person(rng) for _ in range(12)})[:10]
-    rows = [[SHEET, "Products"], ["Code", "Product", "Category", "Unit price", "Units sold", "Revenue"]]
+    rows = [[SHEET, "Products"], ["Code", "Product", "Category", "Unit price"]]
     np = len(products)
-    quarters = ["Q1 Sales", "Q2 Sales", "Q3 Sales", "Q4 Sales"]
-    for i, (code, name, cat, price) in enumerate(products, start=2):
-        units = "+".join(f"SUMIF({ref(q, 'C:C')},A{i},{ref(q, 'E:E')})" for q in quarters)
-        revenue = "+".join(f"SUMIF({ref(q, 'C:C')},A{i},{ref(q, 'G:G')})" for q in quarters)
-        rows.append([code, name, cat, str(price), f"={units}", f"={revenue}"])
-    rows.append(["", "Total", "", "", f"=SUM(E2:E{np + 1})", f"=SUM(F2:F{np + 1})"])
+    quarters = ["Q1", "Q2", "Q3", "Q4"]
+    for code, name, cat, price in products:
+        rows.append([code, name, cat, str(price)])
     for qi, q in enumerate(quarters):
         rows.append([SHEET, q])
         rows.append(["Date", "Region", "Product code", "Product", "Units", "Unit price", "Revenue",
@@ -61,26 +59,35 @@ def sales_book(rng):
             rows.append([date(rng, qi * 3 + rng.randint(1, 3)), rng.choice(REGIONS), code,
                          f"=VLOOKUP(C{i},Products!$A$2:$D${np + 1},2,FALSE)", str(rng.randint(1, 40)),
                          f"=VLOOKUP(C{i},Products!$A$2:$D${np + 1},4,FALSE)", f"=E{i}*F{i}",
-                         f"=IF(G{i}>100000,G{i}*0.05,IF(G{i}>50000,G{i}*0.02,0))", f"=G{i}-H{i}",
+                         f"=ROUND(IF(G{i}>100000,G{i}*0.05,IF(G{i}>50000,G{i}*0.02,0)),2)", f"=G{i}-H{i}",
                          rng.choice(reps), f'=IF(I{i}>=60000,"Yes","No")'])
         rows.append(["Total", "", "", "", f"=SUM(E2:E{n + 1})", "", f"=SUM(G2:G{n + 1})",
                      f"=SUM(H2:H{n + 1})", f"=SUM(I2:I{n + 1})", "", f'=COUNTIF(K2:K{n + 1},"Yes")'])
     rows.append([SHEET, "Summary"])
+    rows.append(["Product"] + quarters + ["Year net sales", "Share"])
+    for k in range(2, np + 2):
+        rows.append([f"=Products!B{k}"] +
+                     [f"=SUMIF({ref(q, 'C:C')},Products!A{k},{ref(q, 'I:I')})" for q in quarters] +
+                     [f"=SUM(B{k}:E{k})", f"=F{k}/SUM($F$2:$F${np + 1})"])
+    rows.append(["Total"] + [f"=SUM({col(c)}2:{col(c)}{np + 1})" for c in range(1, 6)])
+    rows.append([])
+    top = np + 4
     rows.append(["Region"] + quarters + ["Year total", "Share", "Rank"])
     nr = len(REGIONS)
-    for k, r in enumerate(REGIONS, start=2):
+    first = top + 1
+    for k, r in enumerate(REGIONS, start=first):
         rows.append([r] + [f"=SUMIF({ref(q, 'B:B')},A{k},{ref(q, 'I:I')})" for q in quarters] +
-                    [f"=SUM(B{k}:E{k})", f"=F{k}/F{nr + 2}", f"=RANK(F{k},$F$2:$F${nr + 1})"])
-    rows.append(["Total"] + [f"=SUM({col(c)}2:{col(c)}{nr + 1})" for c in range(1, 6)] + ["=SUM(G2:G%d)" % (nr + 1)])
+                    [f"=SUM(B{k}:E{k})", f"=F{k}/SUM($F${first}:$F${first + nr - 1})",
+                     f"=RANK(F{k},$F${first}:$F${first + nr - 1})"])
+    last = first + nr - 1
+    rows.append(["Total"] + [f"=SUM({col(c)}{first}:{col(c)}{last})" for c in range(1, 6)])
     rows.append([])
-    rows.append(["Sales rep", "Orders", "Net sales", "Average order"])
-    for k, rep in enumerate(reps, start=nr + 5):
-        orders = "+".join(f"COUNTIF({ref(q, 'J:J')},A{k})" for q in quarters)
-        net = "+".join(f"SUMIF({ref(q, 'J:J')},A{k},{ref(q, 'I:I')})" for q in quarters)
-        rows.append([rep, f"={orders}", f"={net}", f"=IF(B{k}=0,0,C{k}/B{k})"])
+    rows.append(["Sales rep", "Q1 orders", "Q2 orders", "Q3 orders", "Q4 orders", "Orders"])
+    for k, rp in enumerate(reps, start=last + 4):
+        rows.append([rp] + [f"=COUNTIF({ref(q, 'J:J')},A{k})" for q in quarters] + [f"=SUM(B{k}:E{k})"])
     rows.append([])
-    rows.append(["Best product", f"=INDEX(Products!B2:B{np + 1},MATCH(MAX(Products!F2:F{np + 1}),Products!F2:F{np + 1},0))"])
-    rows.append(["Best region", f"=INDEX(A2:A{nr + 1},MATCH(MAX(F2:F{nr + 1}),F2:F{nr + 1},0))"])
+    rows.append(["Best product", f"=INDEX(A2:A{np + 1},MATCH(MAX(F2:F{np + 1}),F2:F{np + 1},0))"])
+    rows.append(["Best region", f"=INDEX(A{first}:A{last},MATCH(MAX(F{first}:F{last}),F{first}:F{last},0))"])
     return "sales-report", "Sales Report", rows
 
 
@@ -101,9 +108,9 @@ def payroll_book(rng):
         for i, (no, *_rest) in enumerate(staff, start=2):
             rows.append([no, f"=VLOOKUP(A{i},Staff!$A$2:$D${last},2,FALSE)",
                          f"=VLOOKUP(A{i},Staff!$A$2:$D${last},3,FALSE)", f"=VLOOKUP(A{i},Staff!$A$2:$D${last},4,FALSE)",
-                         str(rng.randint(0, 25) * 1000), str(rng.randint(0, 30)), f"=F{i}*D{i}/176*1.5",
-                         f"=D{i}+E{i}+G{i}", f"=IF(H{i}>24000,(H{i}-24000)*0.3,0)", f"=MIN(H{i}*0.06,2160)",
-                         f"=H{i}*0.0275", f"=H{i}*0.015", f"=H{i}-I{i}-J{i}-K{i}-L{i}"])
+                         str(rng.randint(0, 25) * 1000), str(rng.randint(0, 30)), f"=ROUND(D{i}/176*1.5*F{i},2)",
+                         f"=D{i}+E{i}+G{i}", f"=ROUND(IF(H{i}>24000,(H{i}-24000)*0.3,0),2)", f"=MIN(ROUND(H{i}*0.06,2),2160)",
+                         f"=ROUND(H{i}*0.0275,2)", f"=ROUND(H{i}*0.015,2)", f"=H{i}-I{i}-J{i}-K{i}-L{i}"])
         rows.append(["Total", "", ""] + [f"=SUM({col(c)}2:{col(c)}{last})" for c in range(3, 13)])
     rows.append([SHEET, "Summary"])
     rows.append(["Department", "Staff"] + months + ["Six months"])
@@ -174,7 +181,7 @@ def grades_book(rng):
     rows = [[SHEET, "Students"], ["Adm no", "Name", "Stream", "Gender", "Parent phone"]]
     for no, name, stream in students:
         rows.append([no, name, stream, rng.choice(["F", "M"]), f"07{rng.randint(10, 99)} {rng.randint(100, 999)} {rng.randint(100, 999)}"])
-    terms = ["Term 1", "Term 2", "Term 3"]
+    terms = ["Term1", "Term2", "Term3"]
     ns = len(subjects)
     tot, avg, grd, rnk = col(ns + 2), col(ns + 3), col(ns + 4), col(ns + 5)
     for t in terms:
@@ -194,7 +201,7 @@ def grades_book(rng):
                     [f"=AVERAGE(C{i}:E{i})", f'=IF(E{i}>C{i},"Improving",IF(E{i}<C{i},"Dropping","Steady"))',
                      f"=RANK(F{i},$F$2:$F${n + 1})"])
     rows.append([])
-    rows.append(["Grade", "Term 1", "Term 2", "Term 3"])
+    rows.append(["Grade", "Term1", "Term2", "Term3"])
     for k, g in enumerate("ABCDE", start=n + 4):
         rows.append([g] + [f"=COUNTIF({ref(t, grd + ':' + grd)},A{k})" for t in terms])
     return "class-results", "Class Results", rows
@@ -256,7 +263,7 @@ def expenses_book(rng):
             rows.append([date(rng, mi), f"CL-{mi}{1000 + i}", rng.choice(staff),
                          f"=VLOOKUP(C{i},Staff!$A$2:$B${ns + 1},2,FALSE)", cat,
                          f"{cat} - {rng.choice(['site visit', 'office', 'client meeting', 'trip', 'install'])}",
-                         money(rng, 150, 18000), f"=G{i}*0.16", f"=G{i}+H{i}", rng.choice(["Yes", "Yes", "Yes", "No"])])
+                         money(rng, 150, 18000), f"=ROUND(G{i}*0.16,2)", f"=G{i}+H{i}", rng.choice(["Yes", "Yes", "Yes", "No"])])
         rows.append(["Total", "", "", "", "", "", f"=SUM(G2:G{n + 1})", f"=SUM(H2:H{n + 1})", f"=SUM(I2:I{n + 1})",
                      f'=COUNTIF(J2:J{n + 1},"Yes")'])
     rows.append([SHEET, "Summary"])
@@ -278,22 +285,16 @@ def tracker_book(rng):
              "Train staff", "Write report", "Review costs", "Close project", "Permit application",
              "Trench digging", "Pole installation"]
     team = sorted({person(rng) for _ in range(10)})[:8]
-    rows = [[SHEET, "Tasks"], ["Task ID", "Task", "Owner", "Start", "Days", "End", "Budget", "Hours logged",
-                               "Cost so far", "Remaining", "Progress %", "Status"]]
-    nt = len(tasks)
-    for i, t in enumerate(tasks, start=2):
-        rows.append([f"T-{i - 1:02d}", t, rng.choice(team), date(rng, rng.randint(1, 10)), str(rng.randint(1, 20)),
-                     f"=D{i}+E{i}", money(rng, 20000, 250000), f"=SUMIF(Timesheet!C:C,A{i},Timesheet!E:E)",
-                     f"=SUMIF(Timesheet!C:C,A{i},Timesheet!G:G)+SUMIF(Costs!C:C,A{i},Costs!F:F)", f"=G{i}-I{i}",
-                     str(rng.choice([0, 10, 25, 50, 75, 90, 100])),
-                     f'=IF(K{i}=100,"Done",IF(J{i}<0,"Over budget",IF(K{i}=0,"Not started","In progress")))'])
-    rows.append(["", "Total", "", "", f"=SUM(E2:E{nt + 1})", "", f"=SUM(G2:G{nt + 1})", f"=SUM(H2:H{nt + 1})",
-                 f"=SUM(I2:I{nt + 1})", f"=SUM(J2:J{nt + 1})", f"=AVERAGE(K2:K{nt + 1})", f'=COUNTIF(L2:L{nt + 1},"Done")'])
-    rows.append([SHEET, "Team"])
-    rows.append(["Name", "Role", "Hourly rate"])
+    nt, nm = len(tasks), len(team)
+    rows = [[SHEET, "Team"], ["Name", "Role", "Hourly rate"]]
     for p in team:
         rows.append([p, rng.choice(["Technician", "Engineer", "Supervisor", "Driver"]), str(rng.choice([450, 600, 850, 1200]))])
-    nm = len(team)
+    rows.append([SHEET, "Tasks"])
+    rows.append(["Task ID", "Task", "Owner", "Start", "Days", "End", "Budget", "Progress %"])
+    for i, t in enumerate(tasks, start=2):
+        rows.append([f"T-{i - 1:02d}", t, rng.choice(team), date(rng, rng.randint(1, 10)), str(rng.randint(1, 20)),
+                     f"=D{i}+E{i}", money(rng, 20000, 250000), str(rng.choice([0, 10, 25, 50, 75, 90, 100]))])
+    rows.append(["", "Total", "", "", f"=SUM(E2:E{nt + 1})", "", f"=SUM(G2:G{nt + 1})", f"=AVERAGE(H2:H{nt + 1})"])
     rows.append([SHEET, "Timesheet"])
     rows.append(["Date", "Person", "Task ID", "Task", "Hours", "Rate", "Cost", "Notes"])
     n = rng_rows(rng, 140, 200)
@@ -305,24 +306,29 @@ def tracker_book(rng):
     rows.append(["Total", "", "", "", f"=SUM(E2:E{n + 1})", "", f"=SUM(G2:G{n + 1})"])
     rows.append([SHEET, "Costs"])
     rows.append(["Date", "Item", "Task ID", "Supplier", "Quantity", "Amount"])
-    n = rng_rows(rng, 60, 100)
-    for i in range(2, n + 2):
+    m = rng_rows(rng, 60, 100)
+    for i in range(2, m + 2):
         rows.append([date(rng, rng.randint(1, 10)), rng.choice(["Cable", "Ducts", "Connectors", "Transport", "Hire",
                      "Fuel", "Permits", "Meals"]), f"T-{rng.randint(1, nt):02d}",
                      rng.choice(["Cable World", "Tech Supplies", "Hardware Ltd", "County office"]),
                      str(rng.randint(1, 20)), money(rng, 300, 40000)])
-    rows.append(["Total", "", "", "", "", f"=SUM(F2:F{n + 1})"])
+    rows.append(["Total", "", "", "", "", f"=SUM(F2:F{m + 1})"])
     rows.append([SHEET, "Summary"])
+    rows.append(["Task ID", "Task", "Budget", "Hours logged", "Labour cost", "Other costs", "Spent", "Remaining", "Status"])
+    for k in range(2, nt + 2):
+        rows.append([f"=Tasks!A{k}", f"=Tasks!B{k}", f"=Tasks!G{k}", f"=SUMIF(Timesheet!C:C,A{k},Timesheet!E:E)",
+                     f"=SUMIF(Timesheet!C:C,A{k},Timesheet!G:G)", f"=SUMIF(Costs!C:C,A{k},Costs!F:F)",
+                     f"=E{k}+F{k}", f"=C{k}-G{k}",
+                     f'=IF(Tasks!H{k}=100,"Done",IF(H{k}<0,"Over budget",IF(Tasks!H{k}=0,"Not started","In progress")))'])
+    rows.append(["", "Total"] + [f"=SUM({col(c)}2:{col(c)}{nt + 1})" for c in range(2, 8)] + [f'=COUNTIF(I2:I{nt + 1},"Done")'])
+    rows.append([])
     rows.append(["Person", "Hours", "Cost", "Tasks owned"])
-    for k, p in enumerate(team, start=2):
+    for k, p in enumerate(team, start=nt + 5):
         rows.append([p, f"=SUMIF(Timesheet!B:B,A{k},Timesheet!E:E)", f"=SUMIF(Timesheet!B:B,A{k},Timesheet!G:G)",
                      f"=COUNTIF(Tasks!C:C,A{k})"])
-    rows.append(["Total", f"=SUM(B2:B{nm + 1})", f"=SUM(C2:C{nm + 1})", f"=SUM(D2:D{nm + 1})"])
     rows.append([])
-    rows.append(["Project budget", f"=Tasks!G{nt + 2}"])
-    rows.append(["Spent so far", f"=Tasks!I{nt + 2}"])
-    rows.append(["Budget used", f"=B{nm + 5}/B{nm + 4}"])
-    rows.append(["Tasks over budget", f'=COUNTIF(Tasks!L2:L{nt + 1},"Over budget")'])
+    rows.append(["Budget used", f"=G{nt + 2}/C{nt + 2}"])
+    rows.append(["Tasks over budget", f'=COUNTIF(I2:I{nt + 1},"Over budget")'])
     return "project-tracker", "Project Tracker", rows
 
 
@@ -377,17 +383,133 @@ BOOKS = {
     "monthly-budget": ("Monthly Budget", budget_book,
                        "Budget and Actual for 16 categories x 12 months, Variance sheet, 120-180 payments, Summary"),
     "sales-report": ("Sales Report", sales_book,
-                     "Products list, four quarterly sales sheets (90-150 entries each), Summary by region and rep"),
+                     "Products list, quarterly sales sheets Q1-Q4 (90-150 entries each), Summary by product, region and rep"),
     "inventory-valuation": ("Inventory Valuation", inventory_book,
                             "Items list, Receipts and Issues logs (100-170 entries each), Stock valuation, Summary"),
     "payroll": ("Payroll", payroll_book,
                 "Staff list (40-70), six monthly payroll sheets with PAYE/NSSF/SHIF/housing levy, Summary"),
     "class-results": ("Class Results", grades_book,
-                      "Students list (40-60), three term sheets with 8 subjects, grades, ranks, year Summary"),
+                      "Students list (40-60), Term1-Term3 sheets with 8 subjects, grades, ranks, year Summary"),
     "expense-claims": ("Expense Claims", expenses_book,
                        "Staff limits, four monthly claim sheets (70-120 claims each), Summary per staff and category"),
     "project-tracker": ("Project Tracker", tracker_book,
-                        "Tasks, Team rates, Timesheet (140-200 entries), Costs log, Summary with budget used"),
+                        "Team rates, Tasks, Timesheet (140-200 entries), Costs log, Summary per task and person"),
     "customer-register": ("Customer Register", customers_book,
                           "Plans, 120-180 customers, 180-260 payments, balances and a county Summary"),
 }
+
+
+# =========================================================================== looks
+# How each workbook should look when it opens: column widths, number formats, a styled
+# header row per table and bold total rows. The blank workbook is created with these
+# formats already on the (empty) cells, so whatever the bot types shows up neatly.
+
+PCT = {"share", "variance %", "budget used"}
+DATE = {"date", "start", "end", "joined", "start date"}
+INT_WORDS = ("units", "quantity", "hours", "months active", "staff", "customers", "orders", "count",
+             "opening", "received", "issued", "closing", "reorder", "days", "payments", "tasks",
+             "rank", "disconnect", "progress", "logged", "items to reorder", "over budget", "categories")
+MONEY_WORDS = ("price", "revenue", "discount", "net", "pay", "allowance", "gross", "paye", "nssf", "shif",
+               "levy", "amount", "vat", "cost", "value", "budget", "spent", "remaining", "billed", "paid",
+               "balance", "fee", "limit", "outstanding", "sales", "average order", "actual", "variance", "total",
+               "rate")
+MONTH_NAMES = set(MONTHS) | {"January", "February", "March", "April", "May", "June"}
+
+
+def _is_num(v):
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _fmt_for(header, sheet):
+    h = (header or "").strip().lower()
+    school = sheet.startswith("Term") or sheet == "Students" or "average" in h or h == "subject mean"
+    if h in PCT:
+        return "pct"
+    if h.endswith(" no") or h.endswith(" id") or "account" in h or "code" in h or h in ("phone", "receipt no", "ref no"):
+        return "gen"                     # identifiers: never 1,234,567 style
+    if h in DATE:
+        return "date"
+    if "average" in h or h == "subject mean":
+        return "dec" if school or "order" not in h else "money"
+    if h in ("total",) and (sheet.startswith("Term") or sheet == "Students"):
+        return "int"
+    if any(w in h for w in INT_WORDS):
+        return "int"
+    if header in MONTH_NAMES or h.startswith("q") and h.endswith("sales") or h == "year total" or h == "six months":
+        return "money"
+    if any(w in h for w in MONEY_WORDS):
+        return "money"
+    return "gen"
+
+
+def _label_fmt(label):
+    l = (label or "").lower()
+    if l in PCT:
+        return "pct"
+    if any(w in l for w in ("count", "items to", "categories", "tasks over", "months over")):
+        return "int"
+    if any(w in l for w in ("value", "budget", "spent", "cost")):
+        return "money"
+    return "gen"
+
+
+def split_sheets(rows, default="Sheet1"):
+    """[(sheet name, rows)] from a workbook's rows."""
+    out, cur = [], None
+    for r in rows:
+        if r and r[0] == SHEET:
+            cur = (r[1], [])
+            out.append(cur)
+        else:
+            if cur is None:
+                cur = (default, [])
+                out.append(cur)
+            cur[1].append(r)
+    return out
+
+
+def sheet_looks(rows, default="Sheet1"):
+    """{sheet: {"cells": {(row, col): (fmt, role)}, "widths": {col: width}}}
+    fmt: gen | money | pct | date | int | dec ; role: head | body | total"""
+    looks = {}
+    for name, srows in split_sheets(rows, default):
+        cells, widths = {}, {}
+        headers = []
+        prev_blank = True
+        for r, row in enumerate(srows):
+            nonempty = [c for c in row if c != ""]
+            is_head = (prev_blank and len(nonempty) >= 2 and r + 1 < len(srows)
+                       and all(not str(c).startswith("=") and not _is_num(c) for c in nonempty))
+            if is_head:
+                headers = list(row)
+            label = str(row[0]) if row else ""
+            is_total = label.strip().lower() in ("total", "class average") or (len(row) > 1 and str(row[1]).strip().lower() == "total") \
+                or label.strip().lower() == "subject mean" or (len(row) > 1 and row[1] == "Subject mean")
+            keyval = (not is_head and len(nonempty) == 2 and row and not _is_num(row[0])
+                      and len(row) == 2 and str(row[1]).startswith("=") and not headers[1:2] == [None])
+            for c, v in enumerate(row):
+                if is_head:
+                    fmt, role = "gen", "head"
+                elif keyval and c == 1 and len(srows[r - 1] if r else []) == 0 or (keyval and c == 1 and _label_fmt(label) != "gen"):
+                    fmt, role = _label_fmt(label), "body"
+                else:
+                    fmt = _fmt_for(headers[c] if c < len(headers) else "", name) if c > 0 or not is_total else "gen"
+                    if c == 0 and not is_total:
+                        fmt = _fmt_for(headers[0] if headers else "", name)
+                    role = "total" if is_total else "body"
+                if v == "" and not is_head and role != "total":
+                    continue
+                cells[(r, c)] = (fmt, role)
+                text = str(v)
+                est = len(text) if not text.startswith("=") else {"money": 13, "pct": 7, "date": 11, "int": 7,
+                                                                   "dec": 7}.get(fmt, 18 if "LOOKUP" in text or "!" in text else 12)
+                if fmt == "money" and not text.startswith("=") and _is_num(text):
+                    est = len(f"{float(text):,.2f}")
+                widths[c] = max(widths.get(c, 8), min(42, est + 2))
+            prev_blank = not nonempty
+        looks[name] = {"cells": cells, "widths": widths}
+    return looks
