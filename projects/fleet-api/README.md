@@ -2,7 +2,7 @@
 
 Fleet Management service in Go (standard library only).
 
-Records: Vehicle, Driver, Trip, FuelLog, ServiceRecord, Incident, Document, Notification.
+Records: Vehicle, Driver, Trip, FuelLog, ServiceRecord, Incident.
 
 ```bash
 go test ./...

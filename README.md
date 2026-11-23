@@ -16,6 +16,18 @@ python -m pip install -r requirements.txt
   **Input Monitoring**. In VS Code run **"Shell Command: Install 'code' command in PATH"**.
 - Linux: X11 only; `sudo apt install python3-tk xdotool`.
 
+## Short files, many of them
+
+Every code file the bot types is **at most 100 lines** (most are 40-100), so it finishes many
+files instead of spending hours on one. Each library project has about 90-100 such files and
+still works as a whole (its tests pass). New generated projects are split the same way.
+
+## Data entry with pauses
+
+In spreadsheets the bot pauses before every cell as if reading the next value (about 0.6-1.8 s,
+now and then a longer look), and between rows, then keys the value in. The "Thinking pauses"
+slider in Settings makes all of these longer or shorter.
+
 ## Programming and spreadsheets, nonstop
 
 **Projects** page:
@@ -105,19 +117,19 @@ Or press **F5** in VS Code and pick an "Invotech 360" launch config.
 ## The dashboard
 
 Laid out like the Optimas MS desktop app (navy side rail, white top bar, KPI cards, hairline panels,
-light/dark), with a coding-agent workspace in the style of Cursor / Windsurf:
+light/dark), with a coding workspace in the style of Cursor / Windsurf:
 
-- **Agent** - an IDE view. The explorer shows the project being written (files tick off as they are
+- **Workspace** - an IDE view. The explorer shows the project being written (files tick off as they are
   done), the editor shows the code live as it is typed, with syntax highlighting and a cursor,
-  and the agent panel lists each step (planned, created, thinking, verified...). There is also an
+  and the Task panel lists each step (planned, created, thinking, verified...). There is also an
   Output / Problems / Session panel and a VS Code-style status bar. Click any file to open it in a
   tab.
-- **Ask the agent** - type in the agent box, e.g. `new project in go`, `write fleet-api at 60 wpm`, `typing only`,
+- **Commands** - type in the command box, e.g. `new project in go`, `write fleet-api at 60 wpm`, `typing only`,
   `pause`, `stop`, `status` or `help`.
 - **Command palette** - `Ctrl+K` (or `Ctrl+Shift+P`) runs any action or opens any file.
 - **Overview** - KPI cards and the current run. **Projects** - choose and preview projects.
   **Activity** - full timeline and raw log. **Settings** - every option.
-- Shortcuts: `Ctrl+Enter` start, `Ctrl+.` stop, `Ctrl+L` ask the agent, `Ctrl+J` bottom panel,
+- Shortcuts: `Ctrl+Enter` start, `Ctrl+.` stop, `Ctrl+L` command box, `Ctrl+J` bottom panel,
   `Ctrl+B` explorer.
 
 ## Stop / take over

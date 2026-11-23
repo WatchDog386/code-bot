@@ -2,7 +2,7 @@
 
 Clinic Scheduling service in plain Python (standard library only).
 
-Records: Doctor, Patient, Appointment, Prescription, Invoice, LabResult, Document, Notification, Address, Reminder, Setting, AuditEntry, Note, Review, ContactPerson, Discount, Tag.
+Records: Doctor, Patient, Appointment, Prescription, Invoice, LabResult.
 
 ```bash
 python -m unittest discover -s tests -t .

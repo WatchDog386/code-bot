@@ -2,7 +2,7 @@
 
 Warehouse Inventory service in Go (standard library only).
 
-Records: Supplier, Product, Bin, StockMovement, PurchaseOrder, StockCount, Document, Notification.
+Records: Supplier, Product, Bin, StockMovement, PurchaseOrder, StockCount.
 
 ```bash
 go test ./...

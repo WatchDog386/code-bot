@@ -564,7 +564,7 @@ class Bot:
             self.state = "running"
             self.log(f"Running: {cfg.mode}, {cfg.source} -> {self.editor.name}, {cfg.wpm} wpm")
             self.log("Kill switch: press Esc twice. F9 pauses.")
-            self.event("start", "Agent started", f"{cfg.mode} · {cfg.source} -> {self.editor.name or self.editor.kind} · {cfg.wpm} wpm")
+            self.event("start", "Task started", f"{cfg.mode} · {cfg.source} -> {self.editor.name or self.editor.kind} · {cfg.wpm} wpm")
 
             workers = []
             if cfg.mode in ("both", "mouse"):
@@ -591,7 +591,7 @@ class Bot:
             self.state = "stopped"
             self.activity = ""
             self.log("Stopped")
-            self.event("stop", "Agent stopped", "")
+            self.event("stop", "Task stopped", "")
 
     def _safe(self, fn):
         """Run a worker forever: if it hits an error (or ever runs out of work) it starts
@@ -1070,49 +1070,35 @@ class Bot:
 
     # ----------------------------------------------------------- spreadsheets
     def _type_sheet(self, rows):
-        """Type a table into WPS / Excel like a data-entry clerk: each cell then Tab; at the end
-        of the row Home + Down to column A of the next row (the same in WPS and Excel, whatever
-        Enter does). The columns are already sized and the header frozen; the header is bolded
-        at the end. Steady rhythm: short gaps, a breather every 8-15 rows."""
+        """Type a table into WPS / Excel like a person doing data entry: look at the next value
+        (a pause), key it in, Tab; at the end of the row Home + Down to column A of the next row
+        (the same in WPS and Excel). Columns are already sized and the header frozen; the
+        header is bolded at the end."""
         base = 60.0 / (self.cfg.wpm * 5)
+        k = self.cfg.think
         self.stats["lines_total"] = len(rows)
-        breather = random.randint(8, 15)
         for idx, row in enumerate(rows):
             if not self._gate_hands():
                 return False
-            if idx and idx % breather == 0:
-                breather = random.randint(8, 15)
-                self.activity = "thinking"
-                if not self._wait(random.uniform(1.5, 4.0) * self.cfg.think):
-                    return False
-            elif not self._wait(random.uniform(0.2, 0.6)):
+            # between rows: find the next line on the paper / screen
+            self.activity = "thinking"
+            if not self._wait(random.uniform(1.0, 3.0) * k if idx else 0.5):
                 return False
-            with self._act():
-                if not self._hands.is_set():
-                    continue
-                if self.editor.is_active() is False:
-                    self.editor.focus(force=True)
-                    time.sleep(0.4)
-                    if self.editor.is_active() is False:
-                        self._lose_keys("The spreadsheet isn't the window in front")
-                        continue
-                self.activity = "typing"
-                for cell in row:
-                    text = str(cell)
-                    if text:
-                        if self._type_text(text, base) is None:
-                            return False
-                        if not text.startswith("=") and not re.fullmatch(r"-?[\d.,]+", text):
-                            pyautogui.press("delete")        # drop any AutoComplete suggestion
-                    if self.editor.is_active() is False:
-                        self._lose_keys("The spreadsheet isn't the window in front")
+            for c, cell in enumerate(row):
+                text = str(cell)
+                # before each cell: read the value, sometimes double-check it
+                if text:
+                    pause = random.uniform(0.6, 1.8) * k
+                    if random.random() < 0.08:
+                        pause += random.uniform(2.5, 6.0) * k
+                    self.activity = "thinking"
+                    if not self._wait(pause):
                         return False
-                    pyautogui.press("tab")                   # commit the cell, next column
-                    self.live["text"] += text + "\t"
-                    time.sleep(base * random.uniform(1.0, 2.5))
-                pyautogui.press("home")                      # back to column A ...
-                pyautogui.press("down")                      # ... of the next row
-                self.live["text"] += "\n"
+                state = {"pos": 0}
+                if not self._sheet_keys(lambda: self._sheet_cell(text, base, state)):
+                    return False
+            if not self._sheet_keys(self._sheet_next_row):
+                return False
             self.stats["lines"] += 1
             self.stats["line"] = idx + 1
         with self._act():
@@ -1122,6 +1108,47 @@ class Bot:
                 pyautogui.hotkey("ctrl", "b")
                 time.sleep(0.3)
                 pyautogui.hotkey("ctrl", "home")
+        return True
+
+    def _sheet_keys(self, action):
+        """Run one spreadsheet action with the keyboard - only with the sheet in front. If you
+        have the keyboard / another window, wait until you're done and do it then."""
+        while True:
+            if not self._gate_hands():
+                return False
+            with self._act():
+                if not self._hands.is_set():
+                    continue
+                if self.editor.is_active() is False:
+                    self.editor.focus(force=True)
+                    time.sleep(0.4)
+                if self.editor.is_active() is False:
+                    self._lose_keys("The spreadsheet isn't the window in front")
+                    continue
+                self.activity = "typing"
+                result = action()
+                if result is None:          # interrupted mid-value: carry on once you're done
+                    continue
+                return result
+
+    def _sheet_cell(self, text, base, state):
+        if text:
+            n = self._type_text(text[state["pos"]:], base)
+            if n is None:
+                return False
+            state["pos"] += n
+            if state["pos"] < len(text):
+                return None                                  # you took the keyboard: resume later
+            if not text.startswith("=") and not re.fullmatch(r"-?[\d.,]+", text):
+                pyautogui.press("delete")                    # drop any AutoComplete suggestion
+        pyautogui.press("tab")                               # commit the cell, next column
+        self.live["text"] += text + "\t"
+        return True
+
+    def _sheet_next_row(self):
+        pyautogui.press("home")                              # back to column A ...
+        pyautogui.press("down")                              # ... of the next row
+        self.live["text"] += "\n"
         return True
 
     def _use_editor_for(self, meta):

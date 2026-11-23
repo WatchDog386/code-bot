@@ -14,22 +14,23 @@ place instantly; `steps` are what the bot runs in the terminal afterwards.
 
 import random
 
-from . import go_gen, python_gen, ts_gen
+from . import go_gen, python_gen
+from .split import split_files
 from .schema import DOMAINS, load_domain, pool_entities
 
 LANGUAGES = {
     "python": (python_gen, "service"),
     "go": (go_gen, "api"),
-    "typescript": (ts_gen, "kit"),
 }
-MIN_LINES = 1000
+MIN_LINES = 0           # no padding: the project is as big as its domain
+MAX_FILE_LINES = 100    # every typed file is at most this long (split into several files)
 
 
 def combos():
     return [(d, l) for d in sorted(DOMAINS) for l in sorted(LANGUAGES)]
 
 
-def generate(domain=None, language=None, seed=None, min_lines=MIN_LINES):
+def generate(domain=None, language=None, seed=None, min_lines=MIN_LINES, max_file_lines=MAX_FILE_LINES):
     rng = random.Random(seed)
     key = domain or rng.choice(sorted(DOMAINS))
     lang = language or rng.choice(sorted(LANGUAGES))
@@ -44,6 +45,8 @@ def generate(domain=None, language=None, seed=None, min_lines=MIN_LINES):
         if shortest >= min_lines or not pool:
             break
         d.entities.append(pool.pop())
+    if max_file_lines:
+        files = split_files(files, lang, rng, max_lines=max_file_lines, min_lines=max(30, max_file_lines * 2 // 5))
     return {"name": name, "domain": key, "language": lang, "title": d.title,
             "records": [e.name for e in d.entities],
             "files": files, "scaffold": scaffold, "steps": steps}

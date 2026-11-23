@@ -404,7 +404,7 @@
   <aside class="rail" id="rail">
     <button class="org" data-go="agent" aria-label="Invotech 360 home">
       <div class="logo" data-i="zap"></div>
-      <div style="flex:1;min-width:0"><b>Invotech 360</b><small id="orgSub">Coding agent · localhost</small></div>
+      <div style="flex:1;min-width:0"><b>Invotech 360</b><small id="orgSub">Workspace · localhost</small></div>
       <span data-i="chevD" style="opacity:.8"></span>
     </button>
     <nav class="nav" id="nav"></nav>
@@ -419,7 +419,7 @@
     <!-- ==================================================== top bar -->
     <header class="bar">
       <button class="icon-btn menu-btn" id="menuBtn" aria-label="Menu" data-i="menu"></button>
-      <h1 id="pageTitle">Agent</h1>
+      <h1 id="pageTitle">Workspace</h1>
       <span class="pill" id="state">idle</span>
       <span class="crumb" id="barCrumb"></span>
       <div class="spacer"></div>
@@ -452,7 +452,7 @@
             <div class="tabtools">
               <button class="icon-btn" id="showExplorer" title="Show explorer (Ctrl+B)" data-i="sidebar"></button>
               <button class="icon-btn" id="previewBtn" title="Live preview of the bot's VS Code screen" data-i="monitor"></button>
-              <button class="icon-btn on" id="followBtn" title="Follow the agent's cursor" data-i="eye"></button>
+              <button class="icon-btn on" id="followBtn" title="Follow the cursor" data-i="eye"></button>
               <button class="icon-btn" id="openEditor" title="Open the real editor (VS Code)" data-i="external"></button>
             </div>
           </div>
@@ -466,14 +466,14 @@
           <div class="welcome" id="welcome">
             <div>
               <div class="logo" data-i="zap"></div>
-              <h3>Invotech 360 agent</h3>
+              <h3>Invotech 360</h3>
               <p>Writes real projects in VS Code, file by file, at a human pace. The live code appears here as it's typed.</p>
-              <button class="btn primary" id="welcomeStart"><span data-i="play"></span>Start agent</button>
+              <button class="btn primary" id="welcomeStart"><span data-i="play"></span>Start task</button>
               <div class="keys">
                 <span>Command palette</span><span><kbd>Ctrl</kbd> <kbd>K</kbd></span>
                 <span>Start / resume</span><span><kbd>Ctrl</kbd> <kbd>Enter</kbd></span>
                 <span>Stop</span><span><kbd>Ctrl</kbd> <kbd>.</kbd></span>
-                <span>Ask the agent</span><span><kbd>Ctrl</kbd> <kbd>L</kbd></span>
+                <span>Type a command</span><span><kbd>Ctrl</kbd> <kbd>L</kbd></span>
                 <span>Kill switch (anywhere)</span><span><kbd>Esc</kbd> <kbd>Esc</kbd></span>
                 <span>Pause / resume (anywhere)</span><span><kbd>F9</kbd></span>
               </div>
@@ -495,7 +495,7 @@
 
         <aside class="agent">
           <div class="agent-head">
-            <h2><span data-i="sparkle"></span>Agent</h2>
+            <h2><span data-i="sparkle"></span>Task</h2>
             <button class="btn sm" id="pause"><span data-i="pause"></span>Pause</button>
           </div>
           <div class="runcard" id="runcard">
@@ -506,7 +506,7 @@
           </div>
           <div class="steps" id="steps"></div>
           <div class="composer">
-            <textarea id="ask" rows="2" placeholder="Tell the agent what to do… e.g. “new project in go” or “write fleet-api at 60 wpm”"></textarea>
+            <textarea id="ask" rows="2" placeholder="Type a command… e.g. “start”, “pause”, “60 wpm”, “help”"></textarea>
             <div class="ctl">
               <select id="qProject" title="Project"></select>
               <select id="qMode" title="Mode">
@@ -530,7 +530,7 @@
       </div>
       <div class="cols c3">
         <div class="panel">
-          <div class="panel-head"><h2>Current run</h2><button class="link" data-go="agent">Open agent</button></div>
+          <div class="panel-head"><h2>Current run</h2><button class="link" data-go="agent">Open workspace</button></div>
           <div class="minis">
             <div class="mini"><b id="s_uptime">0:00</b><span>Uptime</span></div>
             <div class="mini"><b id="s_projects">0</b><span>Projects</span></div>
@@ -567,7 +567,7 @@
           <button class="btn" id="sheetStart"><span data-i="chart"></span>Spreadsheet (WPS Office)</button>
           <button class="btn" id="genStart"><span data-i="code"></span>Programming (VS Code)</button>
           <button class="btn primary" id="bothStart"><span data-i="layers"></span>Both, nonstop</button></div>
-        <p class="muted" style="margin:0"><b>Both</b>: a code project in VS Code, then a spreadsheet in WPS Office, round and round. <b>Programming</b>: VS Code opens and the bot types the projects from the library below, one after another, file by file (every file is over 1000 lines), then builds, tests and runs each one in VS Code's terminal. <b>Spreadsheet</b>: WPS Office (or Excel) opens and the bot types your uploaded workbooks and ready-made ones - budget, sales report, inventory, payroll, class results, expense claims, project tracker - cell by cell with real formulas, and saves them.</p>
+        <p class="muted" style="margin:0"><b>Both</b>: a code project in VS Code, then a spreadsheet in WPS Office, round and round. <b>Programming</b>: VS Code opens and the bot types the projects from the library below, one after another, file by file - many short files of up to 100 lines each, so you see lots of files being created and finished. <b>Spreadsheet</b>: WPS Office (or Excel) opens and the bot types your uploaded workbooks and ready-made ones - budget, sales report, inventory, payroll, class results, expense claims, project tracker - cell by cell with real formulas - pausing to read each value before keying it in like a person - and saves them.</p>
         <div class="chips" id="genDomains" style="gap:6px"></div>
       </div>
       <div class="panel" style="margin-bottom:20px">
@@ -594,7 +594,7 @@
     <section class="page hidden" data-page="activity">
       <div class="cols c2" style="margin-top:0">
         <div class="panel">
-          <div class="panel-head"><h2>Agent timeline</h2><button class="link" id="clearTimeline">Clear</button></div>
+          <div class="panel-head"><h2>Task timeline</h2><button class="link" id="clearTimeline">Clear</button></div>
           <div class="timeline" id="timeline"></div>
         </div>
         <div class="panel">
@@ -673,7 +673,7 @@
               <div><label class="f" style="margin-top:0">Source</label>
                 <select id="source">
                   <option value="mixed">Loop forever: new projects + library projects</option>
-                  <option value="generated">New project every time (1000+ lines per file)</option>
+                  <option value="generated">New project every time (files of up to 100 lines)</option>
                   <option value="both">Both: code in VS Code + spreadsheets in WPS Office (nonstop)</option>
                   <option value="spreadsheets">Spreadsheets only (WPS Office, or Excel)</option>
                   <option value="projects">Projects library</option>
@@ -682,7 +682,7 @@
                 </select></div>
             </div>
             <div id="box_generated"><label class="f">Languages for new projects</label><div class="chips" id="gen_langs"></div>
-              <p class="muted" style="margin:10px 0 0">The bot comes up with a new, complete project every time (14 kinds of business app, Python / Go / TypeScript). Every file it types is over 1000 lines, with tests that pass.</p></div>
+              <p class="muted" style="margin:10px 0 0">The bot comes up with a new, complete project every time (14 kinds of business app, Python / Go). Every file it types is up to 100 lines, and the code works (its tests pass).</p></div>
             <div id="box_projects"><p class="muted" style="margin:14px 0 0">Choose projects on the <button class="link" data-go="projects">Projects</button> page.</p></div>
             <div id="box_snippets" class="hidden"><label class="f">Languages</label><div class="chips" id="langs"></div></div>
             <div id="box_file" class="hidden"><label class="f">File to type (full path)</label><input type="text" id="custom_file" placeholder="C:\Users\me\projects\app\main.py"></div>
@@ -909,12 +909,12 @@ function htmlLines(html) {
 
 /* ================================================================ navigation */
 const NAV = [
-  { items: [{ id: "agent", label: "Agent", icon: "sparkle" }, { id: "overview", label: "Overview", icon: "home" }] },
+  { items: [{ id: "agent", label: "Workspace", icon: "sparkle" }, { id: "overview", label: "Overview", icon: "home" }] },
   { title: "Workspace", items: [{ id: "projects", label: "Projects", icon: "folder" }, { id: "activity", label: "Activity", icon: "activity", badge: true }] },
   { title: "Configure", items: [{ id: "behavior", label: "Settings", icon: "sliders" }] },
 ];
 const BOTTOM = [{ id: "palette", label: "Command palette", icon: "search" }, { id: "shortcuts", label: "Shortcuts", icon: "keyboard" }];
-const TITLES = { agent: "Agent", overview: "Overview", projects: "Projects", activity: "Activity", behavior: "Settings" };
+const TITLES = { agent: "Workspace", overview: "Overview", projects: "Projects", activity: "Activity", behavior: "Settings" };
 let page = store.get("page", "agent");
 
 function navItem(i) {
@@ -1211,7 +1211,7 @@ function renderTabs() {
     ? `<button class="etab${t.id === activeTab ? " on" : ""}" data-tab="preview" title="Live view of the bot's screen">${ic("monitor")}<span>Preview</span><span class="x" data-close="preview">${ic("x")}</span></button>`
     : `<button class="etab${t.id === activeTab ? " on" : ""}" data-tab="${esc(t.id)}" title="${esc(t.project + "/" + t.path)}">
       ${fileIcon(t.path)}<span>${esc(t.path.split("/").pop())}</span>
-      ${t.id === "live" ? '<i class="live" title="Agent is writing this file"></i>' : `<span class="x" data-close="${esc(t.id)}">${ic("x")}</span>`}</button>`).join("");
+      ${t.id === "live" ? '<i class="live" title="Being written now"></i>' : `<span class="x" data-close="${esc(t.id)}">${ic("x")}</span>`}</button>`).join("");
 }
 $("etabs").onclick = (e) => {
   const c = e.target.closest("[data-close]");
@@ -1268,7 +1268,7 @@ function renderEditor(force) {
     renderedRows = lines.map((l, i) => rowHtml(l, i));
     renderedTab = t.id + "|" + t.path;
   } else {
-    // only touch the rows that changed (files are 1000+ lines)
+    // only touch the rows that changed
     const rows = box.children;
     while (rows.length > lines.length) { box.lastElementChild.remove(); renderedRows.pop(); }
     lines.forEach((l, i) => {
@@ -1325,7 +1325,7 @@ function renderSteps() {
   const box = $("steps"); const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
   box.innerHTML = (out.join("") || `<div class="reply"><div class="si">${ic("sparkle")}</div><div>Hi! I write real projects in your editor, file by file, like a person would.\nPick a project below and press send, or type <code>help</code>.</div></div>`) + nowLine();
   if (atBottom) box.scrollTop = box.scrollHeight;
-  $("timeline").innerHTML = events.slice().reverse().map(stepHtml).join("") || '<div class="empty">No activity yet. Start the agent to see each step here.</div>';
+  $("timeline").innerHTML = events.slice().reverse().map(stepHtml).join("") || '<div class="empty">No activity yet. Start a task to see each step here.</div>';
   $("recent").innerHTML = events.filter((e) => e.kind !== "think").slice(-6).reverse().map(stepHtml).join("") || '<div class="empty">Nothing yet</div>';
 }
 function updateBell() {
@@ -1434,9 +1434,9 @@ $("qMode").onchange = () => { setMode($("qMode").value); saveSettings(); };
 /* ================================================================ actions */
 async function doStart() {
   if (lastStatus?.running) { if (!["running", "starting"].includes(lastStatus.state)) { await api("/api/resume", {}); poll(); } return { ok: true }; }
-  const r = await api("/api/start", readForm()); render(r.status); toast(r.ok ? "Agent started" : r.message); return r;
+  const r = await api("/api/start", readForm()); render(r.status); toast(r.ok ? "Task started" : r.message); return r;
 }
-async function doStop() { const r = await api("/api/stop", {}); render(r.status); toast("Agent stopped"); }
+async function doStop() { const r = await api("/api/stop", {}); render(r.status); toast("Task stopped"); }
 async function doPauseToggle() {
   if (!lastStatus?.running) return;
   const resume = ["paused", "you", "break"].includes(lastStatus.state);
@@ -1499,7 +1499,7 @@ function render(st) {
   const paused = ["paused", "you", "break"].includes(state);
   for (const b of [$("pause"), $("pause2")]) { b.disabled = !st.running || state === "starting"; b.innerHTML = ic(paused ? "play" : "pause") + (paused ? "Resume" : "Pause"); }
   $("start").disabled = st.running; $("stop").disabled = !st.running;
-  $("send").classList.toggle("stop", st.running); $("send").innerHTML = ic(st.running ? "stop" : "send"); $("send").title = st.running ? "Stop agent" : "Send (Enter)";
+  $("send").classList.toggle("stop", st.running); $("send").innerHTML = ic(st.running ? "stop" : "send"); $("send").title = st.running ? "Stop task" : "Send (Enter)";
   if (state === "you") $("info").textContent = s.resume_in ? `Waiting for you — continues in ${s.resume_in}s of idle` : "Waiting for you — press Resume";
   else $("info").textContent = [st.editor, st.monitor].filter(Boolean).join(" · ");
 
@@ -1583,17 +1583,17 @@ let pItems = [], pIndex = 0;
 function commands() {
   const st = lastStatus, run = st?.running, paused = ["paused", "you", "break"].includes(st?.state);
   const list = [
-    !run && { icon: "play", label: "Agent: Start", hint: "Ctrl+Enter", fn: doStart },
-    run && { icon: paused ? "play" : "pause", label: paused ? "Agent: Resume" : "Agent: Pause", hint: "F9", fn: doPauseToggle },
-    run && { icon: "stop", label: "Agent: Stop", hint: "Ctrl+.", fn: doStop },
+    !run && { icon: "play", label: "Task: Start", hint: "Ctrl+Enter", fn: doStart },
+    run && { icon: paused ? "play" : "pause", label: paused ? "Task: Resume" : "Task: Pause", hint: "F9", fn: doPauseToggle },
+    run && { icon: "stop", label: "Task: Stop", hint: "Ctrl+.", fn: doStop },
     { icon: "external", label: "Open the real editor (VS Code)", fn: openEd },
-    { icon: "msg", label: "Ask the agent…", hint: "Ctrl+L", fn: () => { go("agent"); $("ask").focus(); } },
+    { icon: "msg", label: "Type a command…", hint: "Ctrl+L", fn: () => { go("agent"); $("ask").focus(); } },
     ...Object.entries(TITLES).map(([id, t]) => ({ icon: "chevR", label: "Go to " + t, fn: () => go(id) })),
     { icon: "monitor", label: "Show live preview of VS Code", fn: () => { go("agent"); openPreview(); } },
     { icon: "moon", label: "Toggle dark mode", fn: toggleDark },
     { icon: "terminal", label: "Toggle bottom panel", hint: "Ctrl+J", fn: toggleTerm },
     { icon: "sidebar", label: "Toggle explorer", hint: "Ctrl+B", fn: () => setExplorer($("ide").classList.contains("no-explorer")) },
-    { icon: "eye", label: (follow ? "Stop following" : "Follow") + " the agent's cursor", fn: () => $("followBtn").click() },
+    { icon: "eye", label: (follow ? "Stop following" : "Follow") + " the cursor", fn: () => $("followBtn").click() },
     ...[30, 45, 60, 80].map((w) => ({ icon: "keyboard", label: `Typing speed: ${w} WPM`, fn: () => { $("wpm").value = w; $("wpm").oninput(); saveSettings(); toast(`Speed ${w} WPM (next start)`); } })),
     ...projects.map((p) => ({ icon: "folder", label: "Write project: " + p, fn: () => { $("source").value = "projects"; toggleBoxes(); setSelectedProjects([p]); saveSettings().then(doStart); } })),
   ].filter(Boolean);

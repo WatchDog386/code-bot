@@ -82,6 +82,63 @@ class W:
         return "\n".join(self.lines).rstrip() + "\n"
 
 
+CLASS_BODY = 55   # longest class body before it is continued in a new class
+
+
+def _methods(lines):
+    """Split class-body lines into methods (each starting with its blank line)."""
+    methods, cur = [], []
+    for line in lines:
+        starts = line.startswith("    def ") or line.startswith("    @")
+        if starts and cur and any(l.strip() and not l.startswith("    @") for l in cur[1:] or cur):
+            # keep a blank line that precedes the def with the def
+            lead = []
+            while cur and not cur[-1].strip():
+                lead.insert(0, cur.pop())
+            methods.append(cur)
+            cur = lead
+        cur.append(line)
+    if cur:
+        methods.append(cur)
+    return [m for m in methods if any(l.strip() for l in m)]
+
+
+def _groups(methods, limit=CLASS_BODY):
+    groups, cur, size = [], [], 0
+    for m in methods:
+        if cur and size + len(m) > limit:
+            groups.append(cur)
+            cur, size = [], 0
+        cur.append(m)
+        size += len(m)
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def chain_class(w, start, name, base, doc, attrs=()):
+    """Everything written since `start` is the body of class `name`; if it's long, write it as
+    name + "Part1"(base) -> ... -> name, each continuing the previous one."""
+    body = w.lines[start:]
+    del w.lines[start:]
+    groups = _groups(_methods(body))
+    for i, g in enumerate(groups):
+        last = i == len(groups) - 1
+        cls = name if last else f"{name}Part{i + 1}"
+        parent = base if i == 0 else f"{name}Part{i}"
+        w()
+        w()
+        w(f"class {cls}({parent}):" if parent else f"class {cls}:")
+        w(f'    """{doc}{"" if i == 0 else " (continued)"}."""')
+        if i == 0 and attrs:
+            w()
+            for a in attrs:
+                w(a)
+        for m in g:
+            for line in m:
+                w(line)
+
+
 # --------------------------------------------------------------------------- models
 def models(d, pkg):
     w = W()
@@ -286,10 +343,7 @@ def unknown_fields(data: Dict[str, Any], known: FrozenSet[str]) -> Optional[str]
         w('        """One line for logs and lists."""')
         lf = e.label_field
         w(f'        return f"{e.name} #{{self.id}}' + (f': {{self.{lf.name}}}"' if lf else '"'))
-        w()
-        w("    def missing(self) -> Tuple[str, ...]:")
-        w('        """Required fields that are still empty."""')
-        w(f"        return tuple(name for name in {up}_REQUIRED if not getattr(self, name))")
+
     return w.text()
 
 
@@ -319,7 +373,7 @@ def repository(d, pkg):
     w('T = TypeVar("T")')
     w()
     w()
-    w("""class Repository(Generic[T]):
+    w("""class BaseRepository(Generic[T]):
     \"\"\"Records kept in memory, keyed by id. Subclasses set `model`.\"\"\"
 
     model: Any = None
@@ -369,6 +423,10 @@ def repository(d, pkg):
             self._items.clear()
             self._next_id = 1
 
+
+class Repository(BaseRepository[T]):
+    \"\"\"Records with lookups, paging and JSON / CSV export.\"\"\"
+
     def where(self, keep: Callable[[T], bool]) -> List[T]:
         \"\"\"Records for which `keep(record)` is true.\"\"\"
         return [item for item in self.list() if keep(item)]
@@ -411,13 +469,7 @@ def repository(d, pkg):
         return buffer.getvalue()""")
     for e in d.entities:
         cls = e.name
-        w()
-        w()
-        w(f"class {cls}Repository(Repository[{cls}]):")
-        w(f'    """All {e.plural.replace("_", " ")}, with the lookups the services need."""')
-        w()
-        w(f"    model = {cls}")
-        w(f'    entity_name = "{e.snake}"')
+        start = len(w.lines)
         for f in e.fields:
             n = f.name
             if f.kind in TEXTUAL:
@@ -494,6 +546,9 @@ def repository(d, pkg):
             w("        )))")
         else:
             w("        return self.where(lambda item: needle == str(item.id))")
+        chain_class(w, start, f"{cls}Repository", f"Repository[{cls}]",
+                    f'All {e.plural.replace("_", " ")}, with the lookups the services need',
+                    attrs=(f"    model = {cls}", f'    entity_name = "{e.snake}"'))
     return w.text()
 
 
@@ -558,10 +613,7 @@ class Store:
     w("        }")
     for e in d.entities:
         cls, up = e.name, e.snake.upper()
-        w()
-        w()
-        w(f"class {cls}Service:")
-        w(f'    """Create, change and remove {e.plural.replace("_", " ")}."""')
+        start = len(w.lines)
         w()
         w("    def __init__(self, store: Store) -> None:")
         w("        self.store = store")
@@ -650,6 +702,16 @@ class Store:
             elif f.kind == "bool":
                 w(f'            "{f.name}": len(self.repo.where_{f.name}(True)),')
         w("        }")
+        chain_class(w, start, f"{cls}Service", "", f'Create, change and remove {e.plural.replace("_", " ")}')
+    for e in d.entities:
+        w()
+        w()
+        w(f"def sample_{e.snake}(index: int = 1) -> Dict[str, Any]:")
+        w(f'    """Valid data for a new {e.human} (refs point at seeded records)."""')
+        w("    return {")
+        for f in e.fields:
+            w(f'        "{f.name}": {sample_expr(e, f)},')
+        w("    }")
     w()
     w()
     w("class Services:")
@@ -671,15 +733,6 @@ class Store:
     for e in d.entities:
         w(f'            "{e.plural}": self.{e.plural}.stats(),')
     w("        }")
-    for e in d.entities:
-        w()
-        w()
-        w(f"def sample_{e.snake}(index: int = 1) -> Dict[str, Any]:")
-        w(f'    """Valid data for a new {e.human} (refs point at seeded records)."""')
-        w("    return {")
-        for f in e.fields:
-            w(f'        "{f.name}": {sample_expr(e, f)},')
-        w("    }")
     return w.text()
 
 
@@ -753,17 +806,18 @@ def sort_items(items: List[Any], query: Query, allowed: Tuple[str, ...]) -> List
     key = key.lstrip("-")
     if key not in allowed:
         raise ValidationError("sort", "can't sort on " + key)
-    return sorted(items, key=lambda item: getattr(item, key), reverse=reverse)
-
+    return sorted(items, key=lambda item: getattr(item, key), reverse=reverse)""")
+    api_entities(w, d)
+    w("""
 
 class Api:
     \"\"\"Maps HTTP requests onto the services and returns (status, payload).\"\"\"
 
     def __init__(self, services: Optional[Services] = None) -> None:
         self.services = services or Services()
-        self.routes: Dict[str, Callable[[str, Optional[int], Query, Dict[str, Any]], Response]] = {""")
+        self.routes: Dict[str, Callable[..., Response]] = {""")
     for e in d.entities:
-        w(f'            "{e.path}": self.{e.plural},')
+        w(f'            "{e.path}": handle_{e.plural},')
     w("""        }
 
     def handle(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Response:
@@ -788,71 +842,14 @@ class Api:
             else:
                 return 404, {"error": "unknown resource"}
         try:
-            return self.routes[parts[0]](method, item_id, query, body or {})
+            return self.routes[parts[0]](self.services, method, item_id, query, body or {})
         except ValidationError as exc:
             return 400, {"error": str(exc), "field": exc.field_name}
         except NotFound as exc:
             return 404, {"error": str(exc)}
         except Conflict as exc:
             return 409, {"error": str(exc)}""")
-    for e in d.entities:
-        up = e.snake.upper()
-        w()
-        w(f"    def {e.plural}(self, method: str, item_id: Optional[int], query: Query, body: Dict[str, Any]) -> Response:")
-        w(f"        service = self.services.{e.plural}")
-        w('        if method == "STATS":')
-        w("            return 200, service.stats()")
-        w("        if item_id is None:")
-        w('            if method == "GET":')
-        w(f"                return 200, self.list_{e.plural}(query)")
-        w('            if method == "POST":')
-        w("                return 201, service.create(body).to_dict()")
-        w('            return 405, {"error": "method not allowed"}')
-        w('        if method == "GET":')
-        w("            return 200, service.get(item_id).to_dict()")
-        w('        if method in ("PATCH", "PUT"):')
-        w("            return 200, service.update(item_id, body).to_dict()")
-        w('        if method == "DELETE":')
-        w("            service.delete(item_id)")
-        w("            return 204, None")
-        w('        return 405, {"error": "method not allowed"}')
-        w()
-        w(f"    def list_{e.plural}(self, query: Query) -> List[Dict[str, Any]]:")
-        w(f'        """{e.plural.replace("_", " ").capitalize()} matching the query-string filters."""')
-        w(f"        repo = self.services.store.{e.plural}")
-        w("        items = repo.list()")
-        w('        if "q" in query:')
-        w('            hits = {item.id for item in repo.search(query["q"])}')
-        w("            items = [item for item in items if item.id in hits]")
-        for f in e.fields:
-            n = f.name
-            if f.kind in TEXTUAL:
-                w(f'        if "{n}" in query:')
-                w(f'            items = [item for item in items if item.{n} == query["{n}"]]')
-            elif f.kind in NUMERIC:
-                for side, op in (("min", ">="), ("max", "<=")):
-                    w(f'        if "{side}_{n}" in query:')
-                    w(f'            limit = query_number(query, "{side}_{n}")')
-                    w(f"            items = [item for item in items if item.{n} {op} limit]")
-            elif f.kind == "enum":
-                w(f'        if "{n}" in query:')
-                w(f'            wanted = check_choice("{n}", query["{n}"], {enum_name(e, f)})')
-                w(f"            items = [item for item in items if item.{n} == wanted]")
-            elif f.kind == "bool":
-                w(f'        if "{n}" in query:')
-                w(f'            flag = query_flag(query, "{n}")')
-                w(f"            items = [item for item in items if item.{n} is flag]")
-            elif f.kind == "date":
-                for side, op in (("from", ">="), ("to", "<=")):
-                    w(f'        if "{n}_{side}" in query:')
-                    w(f'            day = check_date("{n}_{side}", query["{n}_{side}"])')
-                    w(f"            items = [item for item in items if item.{n} {op} day]")
-            elif f.kind == "ref":
-                w(f'        if "{n}" in query:')
-                w(f'            wanted_id = query_int(query, "{n}")')
-                w(f"            items = [item for item in items if item.{n} == wanted_id]")
-        w(f"        items = sort_items(items, query, {up}_SORTABLE)")
-        w("        return paginate(items, query)")
+
     w(f'''
 
 class Handler(BaseHTTPRequestHandler):
@@ -916,7 +913,104 @@ if __name__ == "__main__":
     return w.text()
 
 
+def api_entities(w, d):
+    """Per collection: list_<x>() (filters) and handle_<x>() (the methods), as functions."""
+    for e in d.entities:
+        up = e.snake.upper()
+        w()
+        w()
+        w(f"def list_{e.plural}(services: Services, query: Query) -> List[Dict[str, Any]]:")
+        w(f'    """{e.plural.replace("_", " ").capitalize()} matching the query-string filters."""')
+        w(f"    repo = services.store.{e.plural}")
+        w("    items = repo.list()")
+        w('    if "q" in query:')
+        w('        hits = {item.id for item in repo.search(query["q"])}')
+        w("        items = [item for item in items if item.id in hits]")
+        for f in e.fields:
+            n = f.name
+            if f.kind in TEXTUAL:
+                w(f'    if "{n}" in query:')
+                w(f'        items = [item for item in items if item.{n} == query["{n}"]]')
+            elif f.kind in NUMERIC:
+                for side, op in (("min", ">="), ("max", "<=")):
+                    w(f'    if "{side}_{n}" in query:')
+                    w(f'        limit = query_number(query, "{side}_{n}")')
+                    w(f"        items = [item for item in items if item.{n} {op} limit]")
+            elif f.kind == "enum":
+                w(f'    if "{n}" in query:')
+                w(f'        wanted = check_choice("{n}", query["{n}"], {enum_name(e, f)})')
+                w(f"        items = [item for item in items if item.{n} == wanted]")
+            elif f.kind == "bool":
+                w(f'    if "{n}" in query:')
+                w(f'        flag = query_flag(query, "{n}")')
+                w(f"        items = [item for item in items if item.{n} is flag]")
+            elif f.kind == "date":
+                for side, op in (("from", ">="), ("to", "<=")):
+                    w(f'    if "{n}_{side}" in query:')
+                    w(f'        day = check_date("{n}_{side}", query["{n}_{side}"])')
+                    w(f"        items = [item for item in items if item.{n} {op} day]")
+            elif f.kind == "ref":
+                w(f'    if "{n}" in query:')
+                w(f'        wanted_id = query_int(query, "{n}")')
+                w(f"        items = [item for item in items if item.{n} == wanted_id]")
+        w(f"    items = sort_items(items, query, {up}_SORTABLE)")
+        w("    return paginate(items, query)")
+        w()
+        w()
+        w(f"def handle_{e.plural}(services: Services, method: str, item_id: Optional[int], query: Query, body: Dict[str, Any]) -> Response:")
+        w(f'    """{e.plural.replace("_", " ").capitalize()}: list, create, read, change, delete, stats."""')
+        w(f"    service = services.{e.plural}")
+        w('    if method == "STATS":')
+        w("        return 200, service.stats()")
+        w("    if item_id is None:")
+        w('        if method == "GET":')
+        w(f"            return 200, list_{e.plural}(services, query)")
+        w('        if method == "POST":')
+        w("            return 201, service.create(body).to_dict()")
+        w('        return 405, {"error": "method not allowed"}')
+        w('    if method == "GET":')
+        w("        return 200, service.get(item_id).to_dict()")
+        w('    if method in ("PATCH", "PUT"):')
+        w("        return 200, service.update(item_id, body).to_dict()")
+        w('    if method == "DELETE":')
+        w("        service.delete(item_id)")
+        w("        return 204, None")
+        w('    return 405, {"error": "method not allowed"}')
+
+
+
 # ---------------------------------------------------------------------------- tests
+def test_class(w, e, suffix, doc):
+    """Start a TestCase for one model; finish_test_class() writes it (cut into several short
+    TestCases if long, so every file stays under 100 lines)."""
+    finish_test_class(w)
+    w.tc = (len(w.lines), e, suffix, doc)
+
+
+def finish_test_class(w):
+    tc = getattr(w, "tc", None)
+    if not tc:
+        return
+    start, e, suffix, doc = tc
+    w.tc = None
+    body = w.lines[start:]
+    del w.lines[start:]
+    for i, g in enumerate(_groups(_methods(body), CLASS_BODY - 8)):
+        w()
+        w()
+        w(f"class {e.name}{suffix}{i + 1 if i else ''}(unittest.TestCase):")
+        w(f'    """{e.name}: {doc}."""')
+        w()
+        w("    def setUp(self) -> None:")
+        w("        self.services = Services()")
+        w("        self.services.seed()")
+        w(f"        self.service = self.services.{e.plural}")
+        w(f"        self.repo = self.services.store.{e.plural}")
+        for m in g:
+            for line in m:
+                w(line)
+
+
 def tests(d, pkg):
     w = W()
     w(f'"""Tests for the {d.title} service (run: python -m unittest discover -s tests -t .)."""')
@@ -937,18 +1031,8 @@ def tests(d, pkg):
         w(f"    sample_{e.snake},")
     w(")")
     for e in d.entities:
-        svc = f"self.services.{e.plural}"
         lf = e.label_field
-        w()
-        w()
-        w(f"class {e.name}Tests(unittest.TestCase):")
-        w(f'    """{e.name}: validation, links, operations, storage and the API."""')
-        w()
-        w("    def setUp(self) -> None:")
-        w("        self.services = Services()")
-        w("        self.services.seed()")
-        w(f"        self.service = {svc}")
-        w(f"        self.repo = self.services.store.{e.plural}")
+        test_class(w, e, "Tests", "creating and reading")
         w()
         w("    def test_create_and_get(self) -> None:")
         w(f"        item = self.service.create(sample_{e.snake}(10))")
@@ -961,6 +1045,7 @@ def tests(d, pkg):
         w("    def test_missing_record_raises(self) -> None:")
         w("        with self.assertRaises(NotFound):")
         w("            self.service.get(9999)")
+        test_class(w, e, "ValidationTests", "rejecting bad data")
         w()
         w("    def test_unknown_field_is_rejected(self) -> None:")
         w(f"        data = sample_{e.snake}(11)")
@@ -988,6 +1073,7 @@ def tests(d, pkg):
             w(f'        data["{f.name}"] = 9999')
             w("        with self.assertRaises(NotFound):")
             w("            self.service.create(data)")
+        test_class(w, e, "OperationTests", "operations, storage and export")
         for f in e.fields:
             if f.kind == "enum":
                 w()
@@ -1061,6 +1147,7 @@ def tests(d, pkg):
         w("        lines = self.repo.to_csv().splitlines()")
         w('        self.assertTrue(lines[0].startswith("id,"))')
         w(f"        self.assertEqual(len(lines), {SEED + 1})")
+        test_class(w, e, "ApiTests", "the HTTP API")
         w()
         w("    def test_api_round_trip(self) -> None:")
         w("        api = Api(self.services)")
@@ -1081,6 +1168,7 @@ def tests(d, pkg):
         w(f'        status, body = api.handle("POST", "/{e.path}", {{"no_such_field": 1}})')
         w("        self.assertEqual(status, 400)")
         w(f'        self.assertEqual(api.handle("GET", "/{e.path}?sort=nope")[0], 400)')
+    finish_test_class(w)
     w()
     w()
     w('if __name__ == "__main__":')

@@ -1,4 +1,0 @@
-# typed into VS Code's terminal by the bot after the project is written
-npm install --no-audit --no-fund   # wait 45
-npx tsc -p .   # wait 20
-node dist/selftest.js   # wait 8

@@ -2,7 +2,7 @@
 
 School Records service in plain Python (standard library only).
 
-Records: Teacher, Student, Course, Enrollment, Assignment, Attendance, Document, Notification, Address, Reminder, Setting, AuditEntry, Note, Review, ContactPerson, Discount, Tag.
+Records: Teacher, Student, Course, Enrollment, Assignment, Attendance.
 
 ```bash
 python -m unittest discover -s tests -t .
