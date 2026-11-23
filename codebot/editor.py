@@ -265,8 +265,8 @@ class VSCodeEditor:
     def _title_match(self, title):
         return "Visual Studio Code" in title and f"{self.root_name} - " in title + " - "
 
-    def _write_settings(self):
-        vs = os.path.join(self.ws, ".vscode")
+    def _write_settings(self, folder=None):
+        vs = os.path.join(folder or self.ws, ".vscode")
         os.makedirs(vs, exist_ok=True)
         path = os.path.join(vs, "settings.json")
         if os.path.exists(path):
@@ -293,12 +293,20 @@ class VSCodeEditor:
                      "'Shell Command: Install code command in PATH'), or switch to Notepad.")
             return False
         os.makedirs(self.ws, exist_ok=True)
-        self._write_settings()
+        if not self.project_dir:
+            return True     # VS Code opens on the project's own folder once a project starts
         if self.is_open():
             self.focus(force=True)
             return True
-        self.log(f"Opening VS Code workspace {self.ws}")
-        self._run_cli("-n", self.ws)
+        self._open_folder(self.project_dir, reuse=False)
+        return True
+
+    def _open_folder(self, folder, reuse):
+        """Open `folder` as VS Code's folder: the explorer shows exactly this project.
+        reuse=True switches the bot's own window to it (no new window)."""
+        self.root_name = os.path.basename(folder.rstrip("\\/"))
+        self.log(f"Opening VS Code on {folder}")
+        self._run_cli("-r" if reuse else "-n", folder)
         self._launched = True
         for _ in range(40):  # wait up to ~20s for the window
             time.sleep(0.5)
@@ -306,7 +314,6 @@ class VSCodeEditor:
                 break
         time.sleep(4 if not IS_WIN else 2.5)
         self.focus(force=True)
-        return True
 
     # -------------------------------------------------------------- focus
     def focus(self, force=False):
@@ -384,38 +391,10 @@ class VSCodeEditor:
                 shutil.rmtree(path, ignore_errors=True)
         self._save_manifest([n for n in ours if n in keep and os.path.isdir(os.path.join(self.ws, n))])
 
-    def tidy(self):
-        """The code + the file explorer on the left, nothing else: normal zoom, no terminal
-        panel, no chat/secondary side bar. Then the keyboard goes back into the code."""
-        for command in ("View: Reset Zoom", "View: Hide Secondary Side Bar", "View: Hide Panel",
-                        "View: Show Explorer"):
-            self._palette(command, settle=0.5)
-            human.press_esc()               # close the palette if that command doesn't exist
-        self.focus_editor()
-
-    def clean_start(self):
-        """Right after VS Code opens: close the files and terminals it restored from last
-        time, the side bars and the panel - only if VS Code is really in front."""
-        self.focus(force=True)
-        time.sleep(0.6)
-        if self.is_active() is False:
-            return
-        mod = "command" if IS_MAC else "ctrl"
-        pyautogui.hotkey(mod, "k")
-        pyautogui.hotkey(mod, "w")              # close all editors
-        time.sleep(0.4)
-        self._palette("Terminal: Kill All Terminals", settle=0.5)
-        human.press_esc()
-        self.tidy()
-
     def begin_project(self, name, interactive=True):
-        if interactive:
-            self.focus(force=True)
-            mod = "command" if IS_MAC else "ctrl"
-            pyautogui.hotkey(mod, "k")         # Close all editors (Ctrl+K Ctrl+W)
-            pyautogui.hotkey(mod, "w")
-            time.sleep(0.5)
-            self.tidy()
+        """Create the project's folder and open THAT folder in VS Code (explorer = this
+        project). No command palette, no panels opened or closed, no keyboard shortcuts."""
+        window_up = self._launched and self.is_open()
         ours = self._ours()
         keep = [n for n in ours if n != name] if self.keep_finished else []
         self.cleanup(keep=keep)            # workspace = just the project being written
@@ -428,7 +407,13 @@ class VSCodeEditor:
         os.makedirs(dest, exist_ok=True)
         self._save_manifest(keep + [os.path.basename(dest)])
         self.project_dir = dest
+        self._write_settings(dest)          # clean typing + no terminal/chat, hidden from the explorer
         self.log(f"New project: {os.path.basename(dest)}")
+        if self.cli:
+            if window_up:
+                self.focus(force=True)      # so "-r" switches the bot's window, not one of yours
+                time.sleep(0.4)
+            self._open_folder(dest, reuse=window_up)
         time.sleep(1.0)
 
     def begin_file(self, rel, show=True):
@@ -442,6 +427,8 @@ class VSCodeEditor:
     def show_file(self, path):
         """Open (or switch to) the file's tab. VS Code shows what's on disk."""
         self.current_file = path
+        if self.project_dir and not self.is_open():
+            self._open_folder(self.project_dir, reuse=False)
         self._run_cli(path)
         time.sleep(1.6)
         self.focus(force=True)

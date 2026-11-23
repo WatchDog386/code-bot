@@ -113,6 +113,7 @@ class Config:
             c.schedule_start = "03:00"
         c.mouse_resume = max(0.3, float(c.mouse_resume))
         c.serve_seconds = max(5.0, float(c.serve_seconds))
+        c.terminal_after_project = False   # never use VS Code's terminal: only write the code
         c.monitor = int(c.monitor)
         if c.mode not in ("both", "mouse", "type"):
             c.mode = "both"
@@ -298,9 +299,6 @@ class Bot:
         ok = self.editor.open()
         if ok and cfg.maximize:
             self.editor.place(self.monitor.work)
-        if ok and hasattr(self.editor, "clean_start"):
-            with self._act():
-                self.editor.clean_start()       # no old files, terminals or side bars
         self._confine_mouse()
         return ok
 
@@ -697,6 +695,11 @@ class Bot:
                     time.sleep(random.uniform(0.1, 0.3))
                     pyautogui.click()
                     self._need_caret = True
+            return True
+        if act == "reviewing" and r < 0.3:
+            # glance at the explorer: the files created so far
+            human.move_to(*point_in(layout.explorer()), stop=stop)
+            time.sleep(random.uniform(0.6, 1.8))
             return True
         if act == "reviewing":
             # scroll back over the file that was just written, read it, come back down
@@ -1149,6 +1152,8 @@ class Bot:
         ed = self.editor
         if self.cfg.keep_finished or not getattr(ed, "project_dir", None):
             return
+        if ed.kind == "vscode":
+            return   # left open as it is; the next project replaces it in the same window
         with self._act():
             if self._hands.is_set() and ed.is_active() is not False:
                 if ed.kind == "office":
@@ -1172,9 +1177,10 @@ class Bot:
             self._use_editor_for(meta)
             with self._act():
                 hands = self._hands.is_set()
+                self.editor.begin_project(project, interactive=hands)   # opens VS Code on this project's folder
                 if self.cfg.maximize and self.monitor and hands:
                     self.editor.place(self.monitor.work)
-                self.editor.begin_project(project, interactive=hands)
+                self._confine_mouse()
                 self._write_scaffold(meta.get("scaffold") or [])
             self.stats.update(project=project, files_total=len(files), file_index=0)
             self.stats["projects"] += 1
