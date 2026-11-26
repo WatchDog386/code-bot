@@ -8,4 +8,5 @@ Records: Venue, Concert, TicketType, Attendee, Ticket, Sponsor, Document, Notifi
 npm install
 npx tsc -p .
 node dist/selftest.js
+node dist/example.js
 ```

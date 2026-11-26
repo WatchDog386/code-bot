@@ -52,7 +52,7 @@ def main():
     p.add_argument("--typo-rate", type=float, default=0.015)
     p.add_argument("--mouse-min", type=float, default=4.0)
     p.add_argument("--mouse-max", type=float, default=14.0)
-    p.add_argument("--minutes", type=float, default=0, help="auto-stop after N minutes")
+    p.add_argument("--minutes", type=float, default=0, help=argparse.SUPPRESS)
     p.add_argument("--breaks", action="store_true", help="take short random breaks")
     p.add_argument("--no-scroll", action="store_true")
     p.add_argument("--no-review", action="store_true", help="don't arrow up/down to re-read code")

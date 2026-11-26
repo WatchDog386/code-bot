@@ -7,4 +7,5 @@ Records: Teacher, Student, Course, Enrollment, Assignment, Attendance, Document,
 ```bash
 python -m unittest discover -s tests -t .
 python -m school_service.api      # http://127.0.0.1:8000/health
+python examples/sample_data.py
 ```

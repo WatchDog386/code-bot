@@ -20,10 +20,11 @@ python -m pip install -r requirements.txt
 
 **Projects** page:
 - **Both, nonstop** (default) - a code project from the library typed in VS Code, then a spreadsheet
-  typed in **WPS Office** (Excel if WPS isn't installed), round and round, forever.
+  filled in **WPS Office** (Excel if WPS isn't installed), round and round, forever.
 - **Programming (VS Code)** - only the code library. **Spreadsheet (WPS Office)** - only spreadsheets.
-- **Upload Excel / CSV** - your own workbooks; the bot types them into WPS cell by cell (values and
-  formulas), then ready-made ones (budget, sales, inventory, payroll, results, expenses, tracker).
+- **Upload Excel / CSV** - your own workbooks; the bot types values and formulas into WPS, keeping
+  every worksheet tab from uploaded Excel files, then ready-made ones (budget, sales, inventory,
+  payroll, results, expenses, tracker).
   Finished workbooks can be **downloaded** from the same page (kept in memory, not on disk).
 
 Nothing piles up on your PC: each finished project's folder is removed (tick "Keep finished
@@ -66,11 +67,9 @@ the Invotech 360 icon, like an app, not as a browser tab. In Edge you can also u
 
 `python install.py --uninstall` removes all of it.
 
-**10 hours a day.** By default it starts at **03:00** and works until **13:00**. The 10 hours are
-a hard daily limit: they also count runs you start yourself, and once they're used up it won't
-start again until the next day's 03:00. If you press Stop (or Esc Esc), it stays off until the
-next day. Change the time and the hours under **Settings > Schedule**; it shows today's hours
-used and left, and when it starts next. The hours used are kept in `usage.json`.
+**No time limit.** By default it starts at **03:00** and keeps running until you stop it.
+You can change the start time under **Settings > Schedule**. If you press Stop (or Esc), it
+stays off until the next day.
 
 The computer must be **on (or asleep), signed in and unlocked** at 03:00: mouse and keyboard
 control can't work on a locked screen or the sign-in screen. Set Windows to not lock the screen
@@ -97,7 +96,7 @@ Other commands:
 | `python code_bot.py` | terminal only, no dashboard |
 | `python code_bot.py --projects fleet-api --wpm 70` | one library project, faster |
 | `python code_bot.py --editor notepad` | Notepad instead of VS Code |
-| `python code_bot.py --minutes 120 --breaks` | 2 hours, with short random breaks |
+| `python code_bot.py --breaks` | terminal only, with short random breaks |
 | `python code_bot.py --think 1.5` | even longer thinking pauses (slower, more human) |
 
 Or press **F5** in VS Code and pick an "Invotech 360" launch config.
@@ -105,24 +104,27 @@ Or press **F5** in VS Code and pick an "Invotech 360" launch config.
 ## The dashboard
 
 Laid out like the Optimas MS desktop app (navy side rail, white top bar, KPI cards, hairline panels,
-light/dark), with a coding-agent workspace in the style of Cursor / Windsurf:
+light/dark), with a task workspace in the style of Cursor / Windsurf:
 
-- **Agent** - an IDE view. The explorer shows the project being written (files tick off as they are
+- **Task** - an IDE view. The explorer shows the project being written (files tick off as they are
   done), the editor shows the code live as it is typed, with syntax highlighting and a cursor,
-  and the agent panel lists each step (planned, created, thinking, verified...). There is also an
+  and the task panel lists each step (planned, created, thinking, verified...). Code projects create
+  all project files first, then write at most 50 lines in each file per pass, cycling until each file
+  is complete. There is also an
   Output / Problems / Session panel and a VS Code-style status bar. Click any file to open it in a
   tab.
-- **Ask the agent** - type in the agent box, e.g. `new project in go`, `write fleet-api at 60 wpm`, `typing only`,
+- **Ask Invotech 360** - type in the task box, e.g. `new project in go`, `write fleet-api at 60 wpm`, `typing only`,
   `pause`, `stop`, `status` or `help`.
 - **Command palette** - `Ctrl+K` (or `Ctrl+Shift+P`) runs any action or opens any file.
 - **Overview** - KPI cards and the current run. **Projects** - choose and preview projects.
   **Activity** - full timeline and raw log. **Settings** - every option.
-- Shortcuts: `Ctrl+Enter` start, `Ctrl+.` stop, `Ctrl+L` ask the agent, `Ctrl+J` bottom panel,
+- Shortcuts: `Ctrl+Enter` start, `Ctrl+.` stop, `Ctrl+L` ask Invotech 360, `Ctrl+J` bottom panel,
   `Ctrl+B` explorer.
 
 ## Stop / take over
 
-- **Kill switch: press `Esc` twice quickly** (anywhere). Or **Stop** in the dashboard.
+- **Kill switch: press `Esc` once** (anywhere). Or **Stop** in the dashboard. Both stop typing
+  and release the mouse immediately; F9 pauses or resumes.
 - **F9** pauses / resumes.
 - **Share the mouse.** Move the mouse whenever you like: the bot lets go of it at once but
   **keeps typing in VS Code with real keystrokes**, exactly as before (moving the mouse doesn't
@@ -130,12 +132,14 @@ light/dark), with a coding-agent workspace in the style of Cursor / Windsurf:
   the mouse back ("Take the mouse back after I stop" in Settings). Clicking inside VS Code is
   fine too: the bot puts its cursor back at the end of the file and carries on.
 - **Your keyboard / other windows.** If you start typing, or click into another window, the bot
-  stops sending keystrokes before the next key (they would land in your window) and keeps
-  writing the file on disk character by character instead; VS Code shows it growing. After you
-  have been idle for 5 seconds ("Take the keyboard back after I'm idle") it brings VS Code back
-  and carries on typing for real from the same spot. **Resume** gives it back at once.
+  stops sending keystrokes before the next key (they would land in your window). VS Code files
+  keep growing on disk character by character; for a spreadsheet, it saves a complete workbook
+  beside the open one so Excel or WPS never races a file you are using. After you
+  have been idle for the interval in Settings ("Take the keyboard back after I'm idle") it brings VS Code back
+  and carries on typing for real from the same spot; spreadsheet work keeps going with the next
+  workbook. **Resume** gives the keyboard back at once.
   Don't type in the file the bot is writing while it works in the background.
-  (Turn this off with "Keep writing code while I work". Notepad mode pauses instead.)
+  (Turn this off with "Keep working on files and spreadsheets while I work". Notepad mode pauses instead.)
 - `Ctrl+C` in the terminal quits the server.
 
 ## What the mouse does
@@ -190,7 +194,7 @@ Turn it off under Settings > Screen & workspace.
 
 ## Live preview
 
-The monitor button above the editor in the dashboard (or `preview` in the agent box) opens a
+The monitor button above the editor in the dashboard (or `preview` in the task box) opens a
 **Preview** tab with a live picture of the bot's screen (VS Code, its terminal), updated every
 second. On macOS allow **Screen Recording** for your terminal / Python in System Settings >
 Privacy & Security.
@@ -211,8 +215,8 @@ the bot's mouse never leaves it. "Auto" picks a side screen (not your main one).
 
 ## It never stops
 
-Once started, Invotech 360 keeps going until **you** stop it (Esc Esc, Stop, or the optional
-time limit). By default ("Loop forever" in Settings > What to write) it writes a brand-new
+Once started, Invotech 360 keeps going until **you** stop it (Esc or Stop). By default
+("Loop forever" in Settings > What to write) it writes a brand-new
 project, then the next project from the library, then another new one, round and round.
 When a project is finished it moves straight on to the next one; if anything goes wrong (a
 file can't be written, a command fails, VS Code is slow to open) it notes it in the
@@ -222,24 +226,29 @@ longer stops it either.
 ## Projects: a new one every time
 
 The bot **comes up with a new project for every run** ("New project every time" in
-Settings > What to write, or `new project` in the agent box). It picks one of 14 kinds of
+Settings > What to write, or `new project` in the task box). It picks one of 14 kinds of
 business app (library, clinic, hotel, fleet, school, warehouse, restaurant, gym, events, real
 estate, help desk, payroll, farm, shipping) and one of 3 languages:
 
-| Language | What it writes (each typed file is over 1000 lines) | Terminal afterwards |
+| Language | What it writes (each typed file stays small, ~120-275 lines) | Terminal afterwards |
 |---|---|---|
-| Python | models, repository, services, HTTP API, unittest suite (standard library only) | compile, run the tests, start the API and open it in VS Code |
-| Go | model, store, service, `net/http` API, tests | `go vet`, `go test`, `go run`, open it in VS Code |
-| TypeScript | models, store, services, query layer, self-test (strict, no dependencies) | `npm install`, `tsc`, run the self-test |
+| Python | models, repository, services, HTTP API, unittest suite and runnable sample (`examples/sample_data.py`) | compile, run the tests, start the API and open it in VS Code |
+| Go | model, store, service, `net/http` API, tests and runnable sample (`examples/sample`) | `go vet`, `go test`, `go run`, open it in VS Code |
+| TypeScript | models, store, services, query layer, self-test and runnable sample (`src/example.ts`) | `npm install`, `tsc`, run the self-test |
 
-Records are added to the project until every file it types is over 1000 lines (typically
-1000-2600). The code is real and works: every combination is checked to compile and pass its
-own tests. Small files a project needs (go.mod, package.json, README, `__init__.py`) are put in
-place instantly instead of being typed. Pick the languages under Settings > What to write.
+Projects are deliberately kept small: each one uses just the domain's root record type, so every
+file the bot types is short and it finishes one file and moves to the next quickly instead of
+grinding through a thousand-line file. The code is still real and works: every combination is
+checked to compile and pass its own tests. Each generated project also includes a runnable example
+file. Small files a project needs (go.mod, package.json,
+README, `__init__.py`) are put in place instantly instead of being typed. Pick the languages under
+Settings > What to write.
 
 The **Projects** page also has a library of 6 ready projects made this way (clinic-service,
-school-service, fleet-api, warehouse-api, restaurant-kit, events-kit). To
-add more generated ones to the library:
+school-service, fleet-api, warehouse-api, restaurant-kit, events-kit). Use **Upload project ZIP**
+to import your own project; its supported text files keep their folders and contents, then show up
+in the same preview/write library. `.git`, dependency/build folders, binary files and files over
+400 KB, as well as non-ASCII text, are skipped. To add more generated ones to the library:
 
 ```bash
 python -m codebot.gen --out projects --count 6
@@ -257,13 +266,18 @@ python -m codebot.gen --out projects --count 6
   ("files verified clean" in the dashboard).
 - **Clean workspace**: the workspace only ever holds the project being written. When a new
   project starts, the previous one is deleted (tick "Keep finished projects" to keep them).
-  Folders you put there yourself are never touched, and `.vscode` is hidden from the explorer.
+  Folders you put there yourself are never touched, and `.vscode` and the resume checkpoint are
+  hidden from the explorer. An unfinished bot-created project keeps a source snapshot and resumes
+  from the text already saved when you start Invotech 360 again. If a file changed after the
+  checkpoint, the bot stops and leaves that project open instead of overwriting the edits.
 - **Human pace**: about 80 WPM raw (0.15 s per keystroke, the same in VS Code and WPS/Excel), plus thinking pauses before functions, between lines,
   between files (6-20 s) and projects (25-60 s), and occasional 5-14 s "stop and think"
   moments. The "Thinking pauses" slider scales all of them.
 - **Human typing**: word-by-word rhythm, slower on symbols and capitals, thinking pauses before
   functions and classes, typos fixed with backspace, occasional back-up-and-retype, arrowing up to
-  re-read code, Ctrl+S now and then, speed drifting over time.
+  re-read code, Ctrl+S now and then, speed drifting over time. During review it checks Python and
+  JSON syntax, and applies only small, verifiable fixes such as a missing Python block colon or a
+  trailing JSON comma. It parses each repaired file again before marking it clean.
 - **Human mouse**: curved paths, slow-fast-slow speed, slight tremor, overshoot and
   correction, small resting drifts, "reading" moves over the code, glances at the file explorer,
   scrolling, and clicks with a purpose (see "What the mouse does").

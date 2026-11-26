@@ -472,6 +472,80 @@ def split_sheets(rows, default="Sheet1"):
     return out
 
 
+_LIST_HEADERS = {
+    "approved", "target met", "status", "region", "county", "category", "department",
+    "plan", "priority", "payment method", "method", "owner", "assigned to",
+}
+_DATE_HEADERS = {"date", "start", "end", "joined", "start date", "due date"}
+
+
+def _table_features(rows):
+    """Excel interaction ranges for the first table on a sheet."""
+    header_at = None
+    headers = []
+    for r, row in enumerate(rows):
+        vals = [v for v in row if v != ""]
+        if len(vals) < 2 or any(str(v).startswith("=") or _is_num(v) for v in vals):
+            continue
+        # A lone title in the first row is not the field header.
+        if r == 0 and len(vals) == 1:
+            continue
+        header_at, headers = r, [str(v).strip() for v in row]
+        break
+    if header_at is None:
+        return {"freeze_rows": 0, "filter_ref": "", "validations": [], "conditional": []}
+
+    last = header_at
+    for r in range(header_at + 1, len(rows)):
+        row = rows[r]
+        if not any(v != "" for v in row):
+            break
+        label = str(row[0]).strip().lower() if row else ""
+        second = str(row[1]).strip().lower() if len(row) > 1 else ""
+        if label in ("total", "class average", "subject mean") or second == "total":
+            break
+        last = r
+
+    from .sheets import col
+    max_col = max(len(headers), max((len(rows[r]) for r in range(header_at, last + 1)), default=0)) - 1
+    filter_ref = f"A{header_at + 1}:{col(max_col)}{last + 1}" if max_col >= 0 else ""
+    body = rows[header_at + 1:last + 1]
+    validations, conditional = [], []
+    if body:
+        for c, header in enumerate(headers):
+            key = header.lower()
+            if key not in _LIST_HEADERS or key in _DATE_HEADERS:
+                continue
+            values = []
+            for row in body:
+                value = row[c] if c < len(row) else ""
+                value = str(value).strip()
+                if value and not value.startswith("=") and value not in values:
+                    values.append(value)
+            if not 2 <= len(values) <= 20 or len(",".join(values)) > 240:
+                continue
+            ref = f"{col(c)}{header_at + 2}:{col(c)}{last + 1}"
+            validations.append({"ref": ref, "values": values})
+            if key in {"status", "approved", "target met"}:
+                rules = []
+                for value in values:
+                    text = value.strip().lower()
+                    if any(word in text for word in ("over budget", "check", "overdue", "unpaid", "owes", "rejected", "blocked", "no")):
+                        style = 0
+                    elif any(word in text for word in ("progress", "pending", "review", "reorder", "not started", "hold")):
+                        style = 1
+                    elif any(word in text for word in ("done", "complete", "ok", "paid", "approved", "yes", "active", "on track")):
+                        style = 2
+                    else:
+                        continue
+                    rules.append({"value": value, "style": style})
+                if rules:
+                    conditional.append({"ref": ref, "column": col(c), "first_row": header_at + 2, "rules": rules})
+
+    return {"freeze_rows": header_at + 1, "filter_ref": filter_ref,
+            "validations": validations, "conditional": conditional}
+
+
 def sheet_looks(rows, default="Sheet1"):
     """{sheet: {"cells": {(row, col): (fmt, role)}, "widths": {col: width}}}
     fmt: gen | money | pct | date | int | dec ; role: head | body | total"""
@@ -482,6 +556,13 @@ def sheet_looks(rows, default="Sheet1"):
         prev_blank = True
         for r, row in enumerate(srows):
             nonempty = [c for c in row if c != ""]
+            is_title = (r == 0 and len(nonempty) == 1)
+            if is_title:
+                # title row above the headers: bold/shaded like a header, but not the data header
+                cells[(0, 0)] = ("gen", "head")
+                widths[0] = max(widths.get(0, 8), min(42, len(str(row[0])) + 2))
+                prev_blank = True   # title acts as the blank separator so the real header below is detected
+                continue
             is_head = (prev_blank and len(nonempty) >= 2 and r + 1 < len(srows)
                        and all(not str(c).startswith("=") and not _is_num(c) for c in nonempty))
             if is_head:
@@ -511,5 +592,5 @@ def sheet_looks(rows, default="Sheet1"):
                     est = len(f"{float(text):,.2f}")
                 widths[c] = max(widths.get(c, 8), min(42, est + 2))
             prev_blank = not nonempty
-        looks[name] = {"cells": cells, "widths": widths}
+        looks[name] = {"cells": cells, "widths": widths, **_table_features(srows)}
     return looks

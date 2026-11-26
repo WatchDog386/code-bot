@@ -2,9 +2,11 @@
 
     generate("hotel", "go")  ->  {"name": "hotel-api", "files": [...], "scaffold": [...], "steps": [...]}
 
-14 business domains x 3 languages (Python service, Go API, TypeScript kit). Records are
-added to the domain until every typed file is at least `min_lines` long, so each file the
-bot types is a long, real, working source file (with tests that pass).
+14 business domains x 3 languages (Python service, Go API, TypeScript kit). Projects are kept
+small on purpose: each one uses only the domain's root record type, so every typed file stays
+short (well under `max_lines`) and the bot finishes one file and moves on to the next quickly
+instead of grinding through a thousand-line file. The result is still real, working code whose
+tests pass.
 
 `files` are typed by the bot; `scaffold` files (go.mod, package.json, README...) are put in
 place instantly; `steps` are what the bot runs in the terminal afterwards.
@@ -22,28 +24,38 @@ LANGUAGES = {
     "go": (go_gen, "api"),
     "typescript": (ts_gen, "kit"),
 }
-MIN_LINES = 1000
+MAX_LINES = 300   # hard ceiling; a root-only project lands around 140-275 lines per file
 
 
 def combos():
     return [(d, l) for d in sorted(DOMAINS) for l in sorted(LANGUAGES)]
 
 
-def generate(domain=None, language=None, seed=None, min_lines=MIN_LINES):
+def generate(domain=None, language=None, seed=None, max_lines=MAX_LINES):
     rng = random.Random(seed)
     key = domain or rng.choice(sorted(DOMAINS))
     lang = language or rng.choice(sorted(LANGUAGES))
     module, suffix = LANGUAGES[lang]
     d = load_domain(key)
-    name = f"{key}-{suffix}"
+    # Keep just the root record type, so the files stay small and the bot creates several of
+    # them quickly. Extra pool records are only added while every file still fits `max_lines`.
+    d.entities = d.entities[:1]
     pool = pool_entities(d.entities[0], {e.name for e in d.entities})
     rng.shuffle(pool)
-    while True:
-        files, scaffold, steps = module.render(d, name)
-        shortest = min(text.count("\n") for _, text in files)
-        if shortest >= min_lines or not pool:
+    name = f"{key}-{suffix}"
+    files, scaffold, steps = module.render(d, name)
+    while pool:
+        trial = load_domain(key)
+        trial.entities = d.entities + [pool[-1]]
+        try:
+            trial_files, trial_scaffold, trial_steps = module.render(trial, name)
+        except (StopIteration, KeyError):
             break
-        d.entities.append(pool.pop())
+        if max(t.count("\n") for _, t in trial_files) > max_lines:
+            break
+        d.entities = trial.entities
+        files, scaffold, steps = trial_files, trial_scaffold, trial_steps
+        pool.pop()
     return {"name": name, "domain": key, "language": lang, "title": d.title,
             "records": [e.name for e in d.entities],
             "files": files, "scaffold": scaffold, "steps": steps}

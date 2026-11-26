@@ -3,3 +3,4 @@ school_service/repository.py
 school_service/services.py
 school_service/api.py
 tests/test_school.py
+examples/sample_data.py

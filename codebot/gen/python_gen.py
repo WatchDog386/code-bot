@@ -1096,11 +1096,26 @@ def render(d, name):
         (f"{pkg}/services.py", services(d, pkg)),
         (f"{pkg}/api.py", api(d, pkg)),
         (f"tests/test_{d.key}.py", tests(d, pkg)),
+        ("examples/sample_data.py", f'''"""Print a valid example {d.entities[0].human} payload as JSON."""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from {pkg}.services import sample_{d.entities[0].snake}
+
+
+if __name__ == "__main__":
+    print(json.dumps(sample_{d.entities[0].snake}(1), indent=2))
+'''),
     ]
     readme = (f"# {name}\n\n{d.title} service in plain Python (standard library only).\n\n"
               f"Records: {', '.join(e.name for e in d.entities)}.\n\n"
               "```bash\npython -m unittest discover -s tests -t .\n"
-              f"python -m {pkg}.api      # http://127.0.0.1:8000/health\n```\n")
+              f"python -m {pkg}.api      # http://127.0.0.1:8000/health\n"
+              "python examples/sample_data.py\n```\n")
     scaffold = [("README.md", readme), (f"{pkg}/__init__.py", f'"""{d.title} service."""\n'),
                 ("tests/__init__.py", "")]
     steps = [

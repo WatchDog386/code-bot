@@ -1,11 +1,13 @@
 """The bot: writes real projects file by file with human-like typing and mouse movement.
 
 - Lives on one monitor (VS Code gets maximized there, the mouse never leaves it).
-- Esc pressed twice quickly = kill switch. F9 = pause/resume.
+- Esc pressed once = kill switch. F9 = pause/resume.
 - Notices when YOU use the mouse or keyboard, gets out of the way immediately and
   carries on after you've been idle for a while.
 """
 
+import ast
+import json
 import math
 import os
 import random
@@ -30,10 +32,57 @@ from .projects import (explain_command, guess_wait, list_projects, localize_comm
 from .snippets import LANGUAGES, pick_pool
 
 # No corner "fail-safe": you share the mouse, so your cursor resting in a screen corner must
-# not end the run. The kill switch is Esc Esc (or Stop in the dashboard).
+# not end the run. A single Esc or the dashboard Stop button ends the run immediately.
 pyautogui.FAILSAFE = False
 FailSafe = getattr(pyautogui, "FailSafeException", RuntimeError)
 pyautogui.PAUSE = 0
+FILE_CHUNK_LINES = 50
+
+
+def _line_chunks(content, limit=FILE_CHUNK_LINES):
+    """Split source text at line boundaries, keeping each pass within `limit` lines."""
+    text = content.replace("\r\n", "\n").replace("\r", "\n").expandtabs(4)
+    lines = text.splitlines(keepends=True)
+    if not lines:
+        return [""]
+    return ["".join(lines[i:i + limit]) for i in range(0, len(lines), limit)]
+
+
+def _repair_known_syntax_error(path, content, error):
+    """Apply one narrowly safe correction, and return it only if parsing then succeeds."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".py" and isinstance(error, SyntaxError) and error.msg == "expected ':'" and error.lineno:
+        lines = content.splitlines(keepends=True)
+        index = error.lineno - 1
+        if 0 <= index < len(lines):
+            line = lines[index]
+            ending = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
+            code = line[:-len(ending)] if ending else line
+            header = re.match(r"^\s*(?:async\s+def|def|class|if|elif|else|for|while|try|except|finally|with|match|case)\b", code)
+            if header and "#" not in code and not code.rstrip().endswith(":"):
+                trimmed = code.rstrip()
+                lines[index] = trimmed + ":" + code[len(trimmed):] + ending
+                repaired = "".join(lines)
+                try:
+                    ast.parse(repaired, filename=path)
+                except SyntaxError:
+                    pass
+                else:
+                    return repaired
+    elif ext == ".json" and isinstance(error, json.JSONDecodeError):
+        index = min(error.pos, len(content)) - 1
+        while index >= 0 and content[index].isspace():
+            index -= 1
+        if index >= 0 and content[index] == ",":
+            repaired = content[:index] + content[index + 1:]
+            try:
+                json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+            else:
+                return repaired
+    return None
+
 
 NEIGHBORS = {
     "a": "qwsz", "b": "vghn", "c": "xdfv", "d": "serfcx", "e": "wsdr", "f": "drtgvc",
@@ -48,7 +97,6 @@ BLOCK_START = re.compile(
 CONTROL = ("if ", "for ", "while ", "switch", "try", "return", "else", "elif ", "case ", "catch")
 SNIPPET_EXT = {"python": "py", "javascript": "js", "typescript": "ts", "sql": "sql",
                "go": "go", "java": "java"}
-DOUBLE_ESC_WINDOW = 0.6
 IS_WIN = sys.platform.startswith("win")
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")  # seconds between the two Esc presses
 
@@ -88,7 +136,7 @@ class Config:
     minutes: float = 0
     schedule_enabled: bool = True      # start by itself every day at schedule_start
     schedule_start: str = "03:00"      # HH:MM, this computer's local time
-    daily_hours: float = 10.0          # most hours it may run per day (0 = no limit)
+    daily_hours: float = 0.0           # no time limit
     start_delay: float = 3.0
 
     @classmethod
@@ -104,13 +152,13 @@ class Config:
         c.mouse_max = max(c.mouse_min, float(c.mouse_max))
         c.typo_rate = max(0.0, min(0.3, float(c.typo_rate)))
         c.clear_after_lines = max(0, int(c.clear_after_lines))
-        c.minutes = max(0.0, float(c.minutes))
+        c.minutes = 0.0                 # runs have no automatic time limit
         c.start_delay = max(0.0, float(c.start_delay))
         c.resume_after = max(0.0, float(c.resume_after))
         if c.resume_after == 5.0:      # the old default: take back sooner now
             c.resume_after = 2.0
         c.terminal_timeout = max(10.0, float(c.terminal_timeout))
-        c.daily_hours = max(0.0, min(24.0, float(c.daily_hours)))
+        c.daily_hours = 0.0             # runs have no daily time limit
         try:
             hh, mm = (int(v) for v in str(c.schedule_start).split(":"))
             c.schedule_start = f"{max(0, min(23, hh)):02d}:{max(0, min(59, mm)):02d}"
@@ -147,11 +195,12 @@ class Bot:
         self._acting = False
         self._act_end = 0.0
         self._last_user = 0.0
-        self._last_esc = 0.0
         self._need_refocus = False
+        self._resume_cell = False          # spreadsheet: the cell the bot paused in
+        self._cell_rc = None               # spreadsheet: (row, col) it was working on
         self._listeners = []
         human.on_interfere = lambda: self._user_input("mouse")
-        # live mirror of the work, for the dashboard's editor / agent panels
+        # live mirror of the work, for the dashboard's editor / task panels
         self.events = deque(maxlen=200)
         self._event_id = 0
         self.activity = ""
@@ -161,6 +210,9 @@ class Bot:
         self.stop_reason = ""               # why the last run ended
         self.started_by = ""                # "user" or "schedule"
         self._job_iter = None               # the never-ending project rotation
+        self._resume_job = None             # an unfinished VS Code project loaded from disk
+        self._resuming_project = False
+        self._active_steps = []
         self.results = deque(maxlen=12)     # finished workbooks (in memory) for download
         self._need_caret = False            # the bot clicked in the code: caret back to the end
         # _hands set = the bot may send keystrokes (cleared when you type, or click into
@@ -185,7 +237,7 @@ class Bot:
         # (kept in memory only - nothing is written to your disk)
 
     def event(self, kind, title, detail=""):
-        """A step for the dashboard's agent timeline (plan, create, write, verify, ...)."""
+        """A step for the dashboard's task timeline (plan, create, write, verify, ...)."""
         self._event_id += 1
         self.events.append({"id": self._event_id, "t": time.time(), "kind": kind,
                             "title": title, "detail": detail})
@@ -204,6 +256,7 @@ class Bot:
         self.stats = {"chars": 0, "lines": 0, "files": 0, "projects": 0, "mouse_moves": 0,
                       "typos": 0, "scrolls": 0, "breaks": 0, "takeovers": 0,
                       "verified": 0, "mismatched": 0, "commands": 0,
+                      "reviewed": 0, "review_issues": 0,
                       "project": "", "file": "", "line": 0, "lines_total": 0,
                       "file_index": 0, "files_total": 0, "started_at": None, "ends_at": None,
                       "resume_in": 0}
@@ -220,12 +273,10 @@ class Bot:
         return self.running and self.state == "you" and not self._hands.is_set()
 
     def _can_background(self):
-        # VS Code: while you work in another window the code never stops - it keeps being
-        # written into the open file (VS Code shows it growing) at the same human pace, and
-        # real keystrokes take over again the moment you leave the computer alone.
-        # (Spreadsheets can't be written behind an open WPS/Excel window: those wait.)
+        # VS Code writes the current source file on disk. Spreadsheet jobs write a finished
+        # workbook beside the open one so Excel/WPS never races a file the user is editing.
         return (self.cfg.background_typing and self.editor is not None
-                and self.editor.kind == "vscode" and bool(self._cur_path))
+                and self.editor.kind in ("vscode", "office") and bool(self._cur_path))
 
     def _gate_mouse(self):
         while self._gate() and not self._mouse.is_set():
@@ -330,6 +381,17 @@ class Bot:
         self.stop_reason = ""
         self.started_by = "user"
         self.make_editor()
+        self._resume_job = None
+        if (self.editor.kind == "vscode"
+                and self.cfg.source in ("both", "mixed", "generated", "projects", "snippets", "file")):
+            checkpoint = self.editor.find_resume_checkpoint()
+            if checkpoint and (not self.cfg.projects or checkpoint["project"] in self.cfg.projects):
+                self._resume_job = (
+                    checkpoint["project"], checkpoint["files"],
+                    {"resume": True, "folder": checkpoint["folder"],
+                     "steps": checkpoint.get("steps", [])},
+                )
+                self.log(f"Found unfinished project {checkpoint['project']}; it will resume from its saved files")
         self._stop.clear()
         self._run.set()
         self._user_paused = False
@@ -347,8 +409,8 @@ class Bot:
         return True, "started"
 
     def stop(self, reason="user"):
-        """reason: "user" (Stop / Esc Esc - stays stopped until the next scheduled start)
-        or "schedule" (the daily window ended or the daily limit was reached)."""
+        """reason: "user" (Stop / Esc - stays stopped until the next scheduled start)
+        or "schedule" (the scheduler stopped it)."""
         self.stop_reason = reason
         if self.running:
             self.log("Stopping..." if reason == "user" else f"Stopping ({reason})")
@@ -356,10 +418,21 @@ class Bot:
         self._run.set()
         self._hands.set()
         self._mouse.set()
+        self.state = "stopping" if self.running else "stopped"
+        try:
+            pyautogui.mouseUp()
+        except Exception:  # noqa: BLE001
+            pass
         proc = self._proc
         if proc and proc.poll() is None:
             self._kill(proc)
-        self.state = "stopped"
+        current = threading.current_thread()
+        for thread in list(self._threads):
+            if thread is current or thread.name == "codebot-main":
+                continue
+            thread.join(timeout=0.75)
+        if not self.running:
+            self.state = "stopped"
         return True, "stopped"
 
     def pause(self):
@@ -408,13 +481,13 @@ class Bot:
 
     # ------------------------------------------------- keyboard / mouse watch
     def start_listeners(self):
-        """Global hotkeys (Esc Esc = stop, F9 = pause) and 'you took over' detection."""
+        """Global hotkeys (Esc = stop, F9 = pause) and 'you took over' detection."""
         if self._listeners:
             return True
         try:
             from pynput import keyboard, mouse
         except ImportError:
-            self.log("pynput not installed: no Esc-Esc kill switch or takeover detection")
+            self.log("pynput not installed: no Esc kill switch or takeover detection")
             return False
 
         # Windows and macOS mark synthetic input reliably; on Linux/X11 pynput reports
@@ -428,15 +501,13 @@ class Bot:
                 injected = None
             if key == keyboard.Key.esc:
                 now = time.time()
-                if now - human.last_bot_esc < 0.5:
+                if injected is None and now - human.last_bot_esc < 0.1:
                     return   # the bot closing a suggestion popup / the palette, not you
-                if now - self._last_esc < DOUBLE_ESC_WINDOW:
-                    self._last_esc = 0
-                    if self.running:
-                        self.log("Esc Esc - kill switch")
-                        self.stop()
+                if self.running:
+                    self.log("Esc - emergency stop")
+                    self.stop()
                     return
-                self._last_esc = now
+                return
             elif key == keyboard.Key.f9:
                 self.toggle_pause()
                 return
@@ -473,7 +544,7 @@ class Bot:
             self._listeners = [kl, ml]
             return True
         except Exception as exc:  # noqa: BLE001
-            self.log(f"Input listener failed ({exc}); Esc-Esc / takeover detection off")
+            self.log(f"Input listener failed ({exc}); Esc / takeover detection off")
             return False
 
     def _user_input(self, what):
@@ -501,7 +572,7 @@ class Bot:
         self._last_user = time.time()          # counts as you being busy: no instant take-back
         if not self._hands.is_set() or self.state not in ("running", "you"):
             return
-        after = (f"takes it back after {self.cfg.resume_after:.0f}s idle" if self.cfg.resume_after
+        after = (f"takes it back after {self.cfg.resume_after:.1f}s idle" if self.cfg.resume_after
                  else "press Resume / F9 to give it back")
         self._need_refocus = True
         self.stats["takeovers"] += 1
@@ -509,8 +580,14 @@ class Bot:
             self._hands.clear()
             self._bg_ready = False
             self.state = "you"
-            self.log(f"{why} - bot let go of the keyboard, keeps writing the file in the background ({after})")
-            self.event("you", f"{why} - keyboard is yours", "the code keeps being written in the background · " + after)
+            if self.editor.kind == "office":
+                detail = "the workbook is being completed on disk in the background · " + after
+                action = "finishes the workbook"
+            else:
+                detail = "the code keeps being written in the background · " + after
+                action = "keeps writing the file"
+            self.log(f"{why} - bot let go of the keyboard and {action} ({after})")
+            self.event("you", f"{why} - keyboard is yours", detail)
         else:
             self._hands.clear()
             self._run.clear()
@@ -535,6 +612,7 @@ class Bot:
     def _take_back(self):
         if not self._hands.is_set():
             self._need_refocus = True
+            self._resume_cell = True
             self._hands.set()
 
     def _check_auto_resume(self):
@@ -550,19 +628,41 @@ class Bot:
             self.state = "running"
             self._run.set()
             self.log("You've been idle - bot takes the keyboard back")
-            self.event("resume", "You're idle - back to typing in VS Code", "")
+            where = self.editor.name if self.editor and getattr(self.editor, "name", "") else "the editor"
+            self.event("resume", f"You're idle - back to typing in {where}", "")
 
     def _refocus_if_needed(self):
-        """After a pause, bring the editor back and put the caret back at the end."""
-        if self._need_refocus and self.editor and self.editor.kind != "focused":
-            self._need_refocus = False
-            if self._cur_path and hasattr(self.editor, "show_file"):
-                self.editor.show_file(self._cur_path)   # its tab, freshly reloaded from disk
-            else:
-                self.editor.focus(force=True)
+        """After a pause, bring the editor back and put the caret back where the bot was."""
+        if not (self._need_refocus and self.editor and self.editor.kind != "focused"):
+            return
+        self._need_refocus = False
+        if self.editor.kind == "office":
+            # Spreadsheet: keep the same cell. Ctrl+End would jump to the last used cell
+            # (the "random far-away cell"), so never send it here; just reselect the cell
+            # the bot had reached in case you clicked somewhere while it was paused.
+            self.editor.focus(force=True)
             time.sleep(0.25)
-            pyautogui.hotkey(*doc_end_keys())
-            time.sleep(0.15)
+            if self._cell_rc:
+                self._goto_cell(*self._cell_rc)
+            return
+        if self._cur_path and hasattr(self.editor, "show_file"):
+            self.editor.show_file(self._cur_path)   # its tab, freshly reloaded from disk
+        else:
+            self.editor.focus(force=True)
+        time.sleep(0.25)
+        pyautogui.hotkey(*doc_end_keys())
+        time.sleep(0.15)
+
+    def _goto_cell(self, row, col):
+        """Select a cell by name in WPS/Excel (F5), so a resume lands exactly on it."""
+        from .sheets import col as col_name
+        if str(getattr(self.editor, "name", "")) not in ("WPS Spreadsheets", "Excel"):
+            return
+        pyautogui.press("f5")
+        time.sleep(0.3)
+        pyautogui.write(f"{col_name(col)}{row + 1}", interval=0.06)
+        pyautogui.press("enter")
+        time.sleep(0.25)
 
     # ------------------------------------------------------------ main loop
     def _main(self):
@@ -579,12 +679,10 @@ class Bot:
                 if not self._wait(cfg.start_delay):
                     return
             self.stats["started_at"] = time.time()
-            if cfg.minutes:
-                self.stats["ends_at"] = time.time() + cfg.minutes * 60
             self.state = "running"
             self.log(f"Running: {cfg.mode}, {cfg.source} -> {self.editor.name}, {cfg.wpm} wpm")
-            self.log("Kill switch: press Esc twice. F9 pauses.")
-            self.event("start", "Agent started", f"{cfg.mode} · {cfg.source} -> {self.editor.name or self.editor.kind} · {cfg.wpm} wpm")
+            self.log("Emergency stop: press Esc once. F9 pauses.")
+            self.event("start", "Task started", f"{cfg.mode} · {cfg.source} -> {self.editor.name or self.editor.kind} · {cfg.wpm} wpm")
 
             workers = []
             if cfg.mode in ("both", "mouse"):
@@ -598,11 +696,6 @@ class Bot:
                 w.start()
 
             while not self._stop.is_set():
-                if self.stats["ends_at"] and time.time() >= self.stats["ends_at"]:
-                    self.log("Time limit reached")
-                    self.stop_reason = "time limit"
-                    self._stop.set()
-                    self._run.set()
                 self._check_auto_resume()
                 time.sleep(0.25)
             for w in workers:
@@ -611,17 +704,20 @@ class Bot:
             self.state = "stopped"
             self.activity = ""
             self.log("Stopped")
-            self.event("stop", "Agent stopped", "")
+            self.event("stop", "Task stopped", "")
 
     def _safe(self, fn):
         """Run a worker forever: if it hits an error (or ever runs out of work) it starts
-        again after a short pause. Only Stop / Esc Esc / the time limit end the run."""
+        again after a short pause. Only Stop / Esc end the run."""
         failures = 0
         while not self._stop.is_set():
             try:
                 fn()
                 if self._stop.is_set():
                     return
+                if (fn.__name__ == "_type_loop" and self._job_iter is not None
+                        and getattr(self._job_iter, "gi_frame", None) is None):
+                    self._job_iter = None
                 self.log(f"{fn.__name__.strip('_').replace('_', ' ')} finished - starting the next round")
                 failures = 0
                 delay = 3
@@ -633,8 +729,21 @@ class Bot:
             except Exception as exc:  # noqa: BLE001
                 failures += 1
                 delay = min(60, 5 * failures)
+                if (fn.__name__ == "_type_loop" and self._job_iter is not None
+                        and getattr(self._job_iter, "gi_frame", None) is None):
+                    self._job_iter = None
                 self.log(f"Problem in {fn.__name__}: {exc!r} - recovering, carrying on in {delay}s")
                 self.event("warn", "Recovered from a problem", f"{exc!r} · carrying on in {delay}s")
+                if (fn.__name__ == "_type_loop" and getattr(self.editor, "kind", None) == "vscode"
+                        and self.cfg.source in ("both", "mixed", "generated", "projects", "snippets", "file")):
+                    checkpoint = self.editor.find_resume_checkpoint()
+                    if checkpoint and (not self.cfg.projects or checkpoint["project"] in self.cfg.projects):
+                        self._resume_job = (
+                            checkpoint["project"], checkpoint["files"],
+                            {"resume": True, "folder": checkpoint["folder"],
+                             "steps": checkpoint.get("steps", [])},
+                        )
+                        self._job_iter = None
             self._need_refocus = True
             if not self._wait(delay):
                 return
@@ -772,14 +881,14 @@ class Bot:
         cfg = self.cfg
         if cfg.source == "spreadsheets":
             from .sheets import sheets_cycle
-            for p in sheets_cycle(selected=cfg.sheet_projects):
+            for p in sheets_cycle(selected=cfg.sheet_projects, log=self.log):
                 self.log(f"New spreadsheet project: {p['title']}")
                 yield p["name"], p["files"], p
             return
         if cfg.source == "both":
             # forever: a code project from the library in VS Code, then a spreadsheet in WPS Office
             from .sheets import sheets_cycle
-            sheets = sheets_cycle()
+            sheets = sheets_cycle(log=self.log)
             library = project_cycle(cfg.projects) if list_projects() else None
             while True:
                 if library is not None:
@@ -856,9 +965,29 @@ class Bot:
         if self.editor is None or self.editor.kind not in ("vscode", "office"):
             return True
         if self.editor.is_active() is False:
+            if self._dismiss_blocking_popup() and self.editor.is_active() is not False:
+                return True
             self._lose_keys("VS Code isn't the window in front")
             return False
         return self._modifiers_clear() or (self._lose_keys("A Ctrl/Alt/Win key is held down") or False)
+
+    def _dismiss_blocking_popup(self):
+        """Cancel a safe, editor-owned modal dialog and record what was dismissed."""
+        handler = getattr(self.editor, "handle_popup", None)
+        if handler is None or self._stop.is_set():
+            return False
+        try:
+            # Call sites run inside _act(), so the dialog key stays serialized with
+            # normal editor input without reacquiring the non-reentrant lock.
+            title = handler()
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Could not inspect editor dialog: {exc!r}")
+            return False
+        if title:
+            self.log(f"Dismissed blocking dialog: {title}")
+            self.event("warn", "Dismissed a blocking dialog", str(title))
+            return True
+        return False
 
     def _modifiers_clear(self, wait=2.0):
         """True when no Ctrl / Alt / Windows key is physically held (Windows; elsewhere
@@ -902,8 +1031,9 @@ class Bot:
             every = 1 if IS_WIN else 40        # Windows: checked before every single key
             if i % every == 0 and self.editor is not None and self.editor.kind in ("vscode", "office") \
                     and self.editor.is_active() is False:
-                self._lose_keys("VS Code isn't the window in front")
-                return i
+                if not (self._dismiss_blocking_popup() and self.editor.is_active() is not False):
+                    self._lose_keys("VS Code isn't the window in front")
+                    return i
             ch = text[i]
             if (self.editor is not None and self.editor.kind == "vscode" and ch.isalpha()
                     and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_"))):
@@ -911,14 +1041,20 @@ class Bot:
                 if len(word) >= 5 and random.random() < 0.015:
                     wrong = self._mangle(word)
                     for wch in wrong:                       # types the word wrong...
+                        if self._stop.is_set():
+                            return None
                         pyautogui.write(wch)
                         time.sleep(self._char_delay(wch, base))
                     time.sleep(random.uniform(0.4, 1.4))
+                    if self._stop.is_set():
+                        return None
                     human.press_esc()                       # (close the suggestion popup)
                     pyautogui.hotkey("ctrl", "backspace")   # ...deletes it and types it properly
                     time.sleep(random.uniform(0.3, 0.9))
                     self.stats["typos"] += 1
             if cfg.typo_rate and i > 0 and ch.lower() in NEIGHBORS and random.random() < cfg.typo_rate:
+                if self._stop.is_set():
+                    return None
                 wrong = random.choice(NEIGHBORS[ch.lower()])
                 pyautogui.write(wrong.upper() if ch.isupper() else wrong)
                 time.sleep(base * random.uniform(2, 5))
@@ -935,9 +1071,13 @@ class Bot:
                 k = random.randint(2, min(4, i))
                 time.sleep(random.uniform(0.3, 0.8))
                 for _ in range(k):
+                    if self._stop.is_set():
+                        return None
                     pyautogui.press("backspace")
                     time.sleep(base * random.uniform(0.7, 1.1))
                 for c in text[i - k + 1:i + 1]:
+                    if self._stop.is_set():
+                        return None
                     pyautogui.write(c)
                     time.sleep(self._char_delay(c, base))
             i += 1
@@ -964,8 +1104,13 @@ class Bot:
                 return None
             self._bg_ready = True
         self.activity = "background"
+        last_flush = time.monotonic()
         while pos < len(full):
+            if self._stop.is_set():
+                self._flush_disk()
+                return None
             if self._hands.is_set():
+                self._flush_disk()
                 return pos
             if not self._gate():
                 return None
@@ -975,7 +1120,10 @@ class Bot:
             self.live["text"] += ch
             self.stats["chars"] += 1
             pos += 1
-            self._flush_disk()
+            if ch == "\n" or time.monotonic() - last_flush >= 0.5:
+                self._flush_disk()
+                last_flush = time.monotonic()
+        self._flush_disk()
         return pos
 
     def _line_pause(self, line):
@@ -995,6 +1143,8 @@ class Bot:
 
     def _review(self):
         """Arrow up a few lines as if re-reading, then come back."""
+        if self._halt_keys():
+            return
         human.press_esc()   # close an autocomplete popup first, or the arrows would move in it
         time.sleep(random.uniform(0.1, 0.3))
         k = random.randint(2, 8)
@@ -1004,18 +1154,27 @@ class Bot:
             pyautogui.press("up")
             time.sleep(random.uniform(0.1, 0.35))
         time.sleep(random.uniform(1.0, 3.0))
+        if self._halt_keys():
+            return
         for _ in range(k):
+            if self._halt_keys():
+                return
             pyautogui.press("down")
             time.sleep(random.uniform(0.06, 0.2))
-        pyautogui.hotkey(*doc_end_keys())
+        if not self._halt_keys():
+            pyautogui.hotkey(*doc_end_keys())
 
     def _type_line(self, full, pos, indent, base):
         """Type `full` (indent + code + newline) from `pos` with keystrokes, exactly like a
         person: indent, the code with its typos and hesitations, Enter. Returns the new
         position (early if you took the keyboard), or None if stopped."""
+        if self._stop.is_set():
+            return None
         if not self._in_front():
             return pos
         while pos < indent:
+            if self._stop.is_set():
+                return None
             if not self._hands.is_set() or not self._check_click():
                 return pos
             pyautogui.press("space")
@@ -1033,31 +1192,31 @@ class Bot:
         stripped = full[indent:body_end]
         if (pos >= body_end and self.editor is not None and self.editor.kind == "vscode"
                 and len(stripped) >= 12 and getattr(self, "_rewritten", None) != full
-                and self._hands.is_set() and random.random() < 0.01):
+                and self._hands.is_set() and not self._stop.is_set() and random.random() < 0.01):
             # not happy with that line: select it back to the indent, delete, think, rewrite
             self._rewritten = full
             human.press_esc()
             pyautogui.hotkey("shift", "home")
             time.sleep(random.uniform(0.4, 1.0))
             pyautogui.press("backspace")
-            self.live["text"] = self.live["text"][:-len(stripped)]
+            self.live["text"] = self.live["text"][:-body_end]
             self.event("edit", "Rewrote a line", stripped[:60])
             time.sleep(random.uniform(1.0, 3.0) * self.cfg.think)
-            return indent
-        if pos < len(full) and self._hands.is_set() and self._in_front():
+            return 0
+        if pos < len(full) and not self._stop.is_set() and self._hands.is_set() and self._in_front():
             pyautogui.press("enter")
             self.live["text"] += "\n"
             pos += 1
         return pos
 
-    def _type_document(self, content):
+    def _type_document(self, content, line_offset=0, total_lines=None):
         cfg = self.cfg
-        content = content.replace("\r\n", "\n").expandtabs(4)
+        content = content.replace("\r\n", "\n").replace("\r", "\n").expandtabs(4)
         ends_with_newline = content.endswith("\n")
         lines = content.split("\n")
         if ends_with_newline:
             lines = lines[:-1]
-        self.stats["lines_total"] = len(lines)
+        self.stats["lines_total"] = total_lines if total_lines is not None else len(lines)
         lines_since_clear = 0
         for idx, line in enumerate(lines):
             if not self._gate():
@@ -1067,7 +1226,7 @@ class Bot:
             pause = self._line_pause(line) / self._energy
             self.activity = "thinking" if pause > 1.5 else "typing"
             if pause > 5:
-                self.event("think", "Thinking", f"{pause:.0f}s before line {idx + 1}")
+                self.event("think", "Thinking", f"{pause:.0f}s before line {line_offset + idx + 1}")
             if not self._wait(pause):
                 return False
             base = 60.0 / (cfg.wpm * 5) / self._energy * random.lognormvariate(0, 0.12)
@@ -1101,7 +1260,7 @@ class Bot:
                 elif not self._gate_hands():
                     return False
             self.stats["lines"] += 1
-            self.stats["line"] = idx + 1
+            self.stats["line"] = line_offset + idx + 1
             lines_since_clear += 1
             if (self.editor.kind == "notepad" and cfg.clear_after_lines
                     and lines_since_clear >= cfg.clear_after_lines):
@@ -1156,53 +1315,94 @@ class Bot:
         return text[:i] + text[i + 1:]
 
     def _cell_slip(self, cell, base):
-        """Excel: enter a wrong value, Tab on, notice it, Shift+Tab back and put it right
-        (sometimes clearing the cell with Delete first). Ends on that cell, ready to retype."""
+        """Excel: enter a wrong value, Tab on, notice it, Shift+Tab back, clear it and put it
+        right (always cleared, so the correct value is never appended to the wrong one)."""
         wrong = self._mangle(cell)
         if wrong == cell:
-            return
+            return True
         for ch in wrong:
+            if self._stop.is_set():
+                return False
             pyautogui.write(ch)
             time.sleep(self._char_delay(ch, base))
+        if self._stop.is_set():
+            return False
         pyautogui.press("tab")
         time.sleep(random.uniform(0.6, 2.5) * self.cfg.think)      # ...wait, that's wrong
+        if self._stop.is_set():
+            return False
         pyautogui.hotkey("shift", "tab")
         time.sleep(random.uniform(0.3, 0.8))
-        if random.random() < 0.5:
-            pyautogui.press("delete")
-            time.sleep(random.uniform(0.3, 0.9))
+        if self._stop.is_set():
+            return False
+        pyautogui.press("delete")
+        time.sleep(random.uniform(0.3, 0.9))
         self.stats["typos"] += 1
         self.event("edit", "Corrected a cell", f"{wrong} -> {cell}")
+        return True
 
     def _sheet_ready(self):
         """True when the bot may type into the spreadsheet right now (WPS/Excel in front)."""
-        if not self._hands.is_set():
+        if self._stop.is_set() or not self._hands.is_set():
             return False
         if self.editor.is_active() is False:
+            if self._dismiss_blocking_popup():
+                time.sleep(0.15)
+            if self._stop.is_set():
+                return False
             self.editor.focus(force=True)
             time.sleep(0.4)
             if self.editor.is_active() is False:
                 return False                         # not in front: never type anywhere else
         return True
 
+    def _complete_sheet_background(self, rows):
+        """Save a complete copy of a workbook without sending keys to the active app."""
+        writer = getattr(self.editor, "complete_in_background", None)
+        if writer is None or not self._cur_path:
+            return False
+        path = writer(self._cur_path, rows)
+        self._cur_path = path
+        self.activity = "background"
+        self.live["file"] = os.path.basename(path)
+        self.live["text"] = "Workbook completed in the background. Download the saved Excel file to view it.\n"
+        self.event("write", "Completed workbook in background", os.path.basename(path))
+        return True
+
     def _type_sheet(self, rows):
         """Type a workbook into WPS / Excel, sheet by sheet: a cell, Tab, the next cell... Enter
         at the end of a row (back to column A). Each sheet's header row is made bold, then
         Ctrl+PageDown moves to the next sheet tab. If you take over mid-cell, it carries on in
-        that same cell when you leave it alone again."""
+        that same cell when you leave it alone again. With background writing enabled, a
+        spreadsheet is saved as a separate complete workbook while you use another app."""
         from .books import SHEET
         base = 60.0 / (self.cfg.wpm * 5)
         self.stats["lines_total"] = len(rows)
+        if getattr(self.editor, "background_complete", False):
+            self.activity = "background"
+            self.live["file"] = os.path.basename(self._cur_path or "workbook.xlsx")
+            self.live["text"] = "Workbook completed in the background. Download the saved Excel file to view it.\n"
+            self.event("write", "Built workbook in background", os.path.basename(self._cur_path or "workbook.xlsx"))
+            return True
         sheet_no = 0
         idx = 0
+        srow = 0                  # spreadsheet row index within the current sheet (0-based)
         while idx < len(rows):
+            if not self._hands.is_set() and self._can_background():
+                return self._complete_sheet_background(rows)
             row = rows[idx]
             if row and row[0] == SHEET:                  # start of the next sheet
+                srow = 0
+                self._cell_rc = None                     # fresh sheet: nothing to resume yet
                 while True:
+                    if not self._hands.is_set() and self._can_background():
+                        return self._complete_sheet_background(rows)
                     if not self._gate_hands():
                         return False
                     with self._act():
                         if self._sheet_ready():
+                            if self._stop.is_set():
+                                return False
                             if sheet_no > 0:
                                 self._bold_header()
                                 pyautogui.hotkey("ctrl", "pagedown")
@@ -1225,18 +1425,36 @@ class Bot:
                 return False
             c, off, entered = 0, 0, False
             while not entered:
+                if not self._hands.is_set() and self._can_background():
+                    return self._complete_sheet_background(rows)
                 if not self._gate_hands():
                     return False
                 with self._act():
                     if not self._sheet_ready():
                         pass
                     else:
+                        # resuming after you took over: retarget the exact cell, then if we
+                        # were mid-cell throw away the partial entry and retype it cleanly
+                        if self._resume_cell and self._hands.is_set():
+                            self._cell_rc = (srow, c)
+                            self._refocus_if_needed()
+                            if self.editor and self.editor.kind == "office" and off > 0:
+                                pyautogui.press("escape")
+                                time.sleep(0.1)
+                                pyautogui.press("delete")
+                                time.sleep(0.1)
+                                off = 0
+                            self._resume_cell = False
                         self.activity = "typing"
                         while c < len(row):
+                            self._cell_rc = (srow, c)
                             cell = str(row[c] or "")
                             if (off == 0 and c < len(row) - 1 and len(cell) >= 3 and not cell.startswith("=")
                                     and random.random() < 0.025):
-                                self._cell_slip(cell, base / self._energy)
+                                if not self._cell_slip(cell, base / self._energy):
+                                    return False
+                                if self._stop.is_set():
+                                    return False
                             if off < len(cell):
                                 n = self._type_text(cell[off:], base / self._energy)
                                 if n is None:
@@ -1244,18 +1462,35 @@ class Bot:
                                 off += n
                                 if off < len(cell):
                                     break                    # you took the keyboard: finish this cell later
+                                if self._stop.is_set():
+                                    return False
                                 if not cell.startswith("=") and not re.fullmatch(r"-?[\d.,]+", cell):
                                     pyautogui.press("delete")    # drop any AutoComplete suggestion
                             if not self._hands.is_set():
                                 break
+                            if self._stop.is_set():
+                                return False
                             if c < len(row) - 1:
                                 pyautogui.press("tab")
                                 self.live["text"] += "\t"
-                                time.sleep(base * random.uniform(0.8, 2.0))
+                                # data entry comes in pulses: a short glance after every cell,
+                                # and now and then a real pause before the next one
+                                if not self._wait(random.uniform(0.45, 1.5) * self.cfg.think):
+                                    return False
+                                if random.random() < 0.12:
+                                    if not self._wait(random.uniform(1.2, 3.2) * self.cfg.think):
+                                        return False
+                                if not self._hands.is_set():
+                                    break
                             c, off = c + 1, 0
                         if c >= len(row) and self._hands.is_set():
+                            if self._stop.is_set():
+                                return False
                             pyautogui.press("enter")
+                            pyautogui.press("home")   # always back to column A of the new row
                             self.live["text"] += "\n"
+                            srow += 1
+                            self._cell_rc = (srow, 0)
                             entered = True
                 if not entered and not self._wait(0.3):
                     return False
@@ -1263,10 +1498,12 @@ class Bot:
             self.stats["line"] = idx + 1
             idx += 1
         with self._act():
-            if self._hands.is_set() and self.editor.is_active() is not False:
+            if not self._stop.is_set() and self._hands.is_set() and self.editor.is_active() is not False:
                 self._bold_header()
                 if sheet_no > 1:
                     for _ in range(sheet_no - 1):        # back to the first sheet before saving
+                        if self._stop.is_set():
+                            return False
                         pyautogui.hotkey("ctrl", "pageup")
                         time.sleep(0.3)
         return True
@@ -1283,8 +1520,9 @@ class Bot:
         elif not sheet and isinstance(self.editor, OfficeEditor) and getattr(self, "_code_editor", None):
             self._office_editor = self.editor
             self.editor = self._code_editor
-            with self._act():
-                self.editor.focus(force=True)
+            if self._hands.is_set():
+                with self._act():
+                    self.editor.focus(force=True)
 
     def _finish_project(self):
         """Close the finished project and remove its folder (nothing is kept on your PC unless
@@ -1294,6 +1532,9 @@ class Bot:
             return
         if ed.kind == "vscode":
             return   # left open as it is; the next project replaces it in the same window
+        if ed.kind == "office" and getattr(ed, "keep_project", False):
+            self.log("Kept the workbook folder because its open spreadsheet was completed in the background")
+            return
         with self._act():
             if self._hands.is_set() and ed.is_active() is not False:
                 if ed.kind == "office":
@@ -1308,79 +1549,272 @@ class Bot:
         if hasattr(ed, "_save_manifest") and hasattr(ed, "_manifest"):
             ed._save_manifest([n for n in ed._manifest() if n != os.path.basename(ed.project_dir)])
 
+    def _write_code_files_round_robin(self, project, files):
+        """Create all files, then write at most 50 lines in each file per pass."""
+        resume = bool(getattr(self, "_resuming_project", False))
+        chunks = []
+        for rel, content in files:
+            normalized = content.replace("\r\n", "\n").replace("\r", "\n").expandtabs(4)
+            prefix = ""
+            if resume:
+                path = os.path.join(self.editor.project_dir, *rel.split("/"))
+                try:
+                    with open(path, encoding="utf-8") as fh:
+                        existing = fh.read().replace("\r\n", "\n").replace("\r", "\n").expandtabs(4)
+                except FileNotFoundError:
+                    existing = ""
+                except (OSError, UnicodeDecodeError):
+                    existing = None
+                if existing is None or not normalized.startswith(existing):
+                    detail = f"{rel} differs from the saved checkpoint and was left untouched."
+                    self.log(f"Resume skipped changed file: {detail} Continuing with the other files.")
+                    self.event("warn", "Skipped changed file", detail + " The rest of the project will continue.")
+                    chunks.append((rel, normalized, "", []))
+                    continue
+                prefix = existing
+            chunks.append((rel, normalized, prefix, _line_chunks(normalized[len(prefix):])))
+        if not self.editor.prepare_files(files, stopped=self._stop.is_set):
+            return False
+        total_rounds = max((len(parts) for _, _, _, parts in chunks), default=0)
+        total_by_file = {rel: max(1, len(content.replace("\r\n", "\n").splitlines()))
+                         for rel, content, _, _ in chunks}
+
+        self.log(f"Created {len(files)} project files; writing up to {FILE_CHUNK_LINES} lines per file per pass")
+        for rel, content, prefix, parts in chunks:
+            if parts:
+                continue
+            self.stats["files"] += 1
+            self.live["done"].append(rel)
+            path = os.path.join(self.editor.project_dir, *rel.split("/"))
+            if self.editor.verify(path, content) is True:
+                self.stats["verified"] += 1
+                self.event("verify", f"Verified {rel}", "already complete before resuming")
+        for round_no in range(total_rounds):
+            if not self._gate():
+                return False
+            self.event("plan", f"Writing pass {round_no + 1}",
+                       f"Up to {FILE_CHUNK_LINES} lines in each of {len(files)} files")
+            for file_index, (rel, content, starting_prefix, parts) in enumerate(chunks, 1):
+                if round_no >= len(parts):
+                    continue
+                if not self._gate():
+                    return False
+                prefix = starting_prefix + "".join(parts[:round_no])
+                chunk = parts[round_no]
+                line_start = prefix.count("\n") + 1
+                line_end = min(total_by_file[rel], line_start + max(0, len(chunk.splitlines()) - 1))
+                self.stats.update(file=rel, file_index=file_index, line=line_start - 1,
+                                  lines_total=total_by_file[rel])
+                self.live.update(file=rel, text=prefix)
+                title = "Created" if round_no == 0 else "Continued"
+                self.event("create" if round_no == 0 else "write", f"{title} {rel}",
+                           f"Pass {round_no + 1}: lines {line_start}-{line_end}")
+                self.log(f"Writing {project}/{rel}, lines {line_start}-{line_end}")
+
+                with self._act():
+                    hands = self._hands.is_set()
+                    if hands and not self._check_click():
+                        hands = False
+                    path = self.editor.begin_file(rel, show=hands, truncate=False)
+                    if round_no > 0 and hands:
+                        self.editor.resume_file(path)
+                    self._cur_path = path
+                    self._bg_ready = not hands
+                    self._need_refocus = not hands
+
+                done = self._type_document(chunk, line_offset=line_start - 1,
+                                           total_lines=total_by_file[rel])
+                if not done:
+                    return False
+
+                final_chunk = round_no + 1 == len(parts)
+                with self._act():
+                    if self._hands.is_set():
+                        if final_chunk:
+                            ok = self.editor.end_file(path, content)
+                        else:
+                            self.editor.save_chunk(path)
+                            ok = None
+                    else:
+                        self._flush_disk()
+                        ok = self.editor.verify(path, content) if final_chunk else None
+
+                if final_chunk:
+                    self.stats["files"] += 1
+                    self.live["done"].append(rel)
+                    if ok is True:
+                        self.stats["verified"] += 1
+                        self.event("verify", f"Verified {rel}", "saved file matches the source")
+                    elif ok is False:
+                        self.event("warn", f"{rel} differs", "saved file does not match the source")
+                        self.stats["mismatched"] += 1
+                        self.log(f"  {rel}: saved file differs from source")
+
+                self.activity = "reviewing"
+                if not self._wait(random.uniform(3, 8) * self.cfg.think):
+                    return False
+        return True
+
+    def _review_static_files(self, project, files):
+        """Run safe syntax checks on supported source/config files without executing them."""
+        checked = issues = 0
+        for index, (rel, content) in enumerate(files):
+            if not self._gate():
+                return False
+            ext = os.path.splitext(rel)[1].lower()
+            try:
+                if ext == ".py":
+                    ast.parse(content, filename=rel)
+                    description = "Python syntax is valid; source was parsed without running it"
+                elif ext == ".json":
+                    json.loads(content)
+                    description = "JSON structure is valid"
+                else:
+                    continue
+            except (SyntaxError, json.JSONDecodeError) as exc:
+                repaired = _repair_known_syntax_error(rel, content, exc)
+                if repaired is not None and self.editor.write_repaired_file(rel, repaired):
+                    files[index] = (rel, repaired)
+                    self.current_files[rel] = repaired
+                    if self.live["file"] == rel:
+                        self.live["text"] = repaired
+                    self.editor.save_resume_checkpoint(project, files, steps=getattr(self, "_active_steps", []))
+                    checked += 1
+                    self.stats["reviewed"] += 1
+                    self.event("edit", f"Corrected {rel}", "Removed a syntax mistake and rechecked the file")
+                    self.event("verify", f"Reviewed {rel}", "the corrected source now parses cleanly")
+                    continue
+                checked += 1
+                issues += 1
+                self.stats["reviewed"] += 1
+                self.stats["review_issues"] += 1
+                line = getattr(exc, "lineno", None)
+                detail = f"line {line}: {exc.msg}" if isinstance(exc, SyntaxError) and line else str(exc)
+                self.event("warn", f"Review issue in {rel}", detail[:240])
+                self.log(f"Static review found an issue in {project}/{rel}: {detail}")
+            else:
+                checked += 1
+                self.stats["reviewed"] += 1
+                self.event("verify", f"Reviewed {rel}", description)
+        if checked:
+            self.event("verify" if not issues else "warn", "Static review complete",
+                       f"{checked} files checked, {issues} issue(s); no project code was executed")
+        return True
+
     def _type_loop(self):
         if self._job_iter is None:          # one rotation per run: survives recoveries
             self._job_iter = self._jobs()
+            if self._resume_job:
+                first = self._resume_job
+                self._resume_job = None
+                jobs = self._job_iter
+
+                def resume_first():
+                    yield first
+                    yield from jobs
+
+                self._job_iter = resume_first()
         for project, files, meta in self._job_iter:
             if not self._gate():
                 return
             self._use_editor_for(meta)
+            scaffold = meta.get("scaffold") or []
+            typeable_project = self.editor.kind == "vscode" and all(
+                isinstance(content, str) for _, content in list(files) + list(scaffold))
+            write_files = list(scaffold) + list(files) if typeable_project else files
+            self._resuming_project = bool(meta.get("resume") and typeable_project)
+            self._active_steps = meta.get("steps") or []
             with self._act():
                 hands = self._hands.is_set()
-                self.editor.begin_project(project, interactive=hands)   # opens VS Code on this project's folder
+                if hands and not self._check_click():
+                    hands = False
+                if self._resuming_project:
+                    self.editor.resume_project(meta["folder"], interactive=hands)
+                else:
+                    self.editor.begin_project(project, interactive=hands)  # opens VS Code on this project's folder
                 if self.cfg.maximize and self.monitor and hands:
                     self.editor.place(self.monitor.work)
                 self._confine_mouse()
-                self._write_scaffold(meta.get("scaffold") or [])
-            self.stats.update(project=project, files_total=len(files), file_index=0)
+                if not typeable_project:
+                    self._write_scaffold(scaffold)
+            if typeable_project and not self._resuming_project:
+                self.editor.save_resume_checkpoint(project, write_files, steps=self._active_steps)
+            self.stats.update(project=project, files_total=len(write_files), file_index=0)
             self.stats["projects"] += 1
-            self.live.update(project=project, files=[r for r, _ in files], done=[], file="", text="")
-            self.current_files = dict(files)
-            self.current_files.update(dict(meta.get("scaffold") or []))
-            self.event("plan", f"Planned {project}", f"{len(files)} files: " +
-                       ", ".join(r for r, _ in files[:6]) + (" ..." if len(files) > 6 else ""))
-            for i, (rel, content) in enumerate(files, 1):
-                if not self._gate():
+            self.live.update(project=project, files=[r for r, _ in write_files], done=[], file="", text="")
+            self.current_files = dict(write_files)
+            if not typeable_project:
+                self.current_files.update(dict(scaffold))
+            self.event("plan", f"Planned {project}", f"{len(write_files)} files: " +
+                       ", ".join(r for r, _ in write_files[:6]) + (" ..." if len(write_files) > 6 else ""))
+            if typeable_project:
+                if not self._write_code_files_round_robin(project, write_files):
+                    self._resuming_project = False
                     return
-                self.stats.update(file=rel, file_index=i, line=0)
-                self.live.update(file=rel, text="")
-                if isinstance(content, list) and self.editor.kind == "office":
-                    self.editor.next_book = content   # the workbook gets its sheet tabs, widths and formats
-                self.event("create", f"Created {rel}", f"{len(content)} rows" if isinstance(content, list)
-                           else f"{content.count(chr(10)) + 1} lines")
-                self.log(f"Writing {project}/{rel}")
-                with self._act():
-                    hands = self._hands.is_set()
-                    # while you're busy: just create the file (VS Code's explorer shows it);
-                    # its tab opens when the bot gets the keyboard back
-                    path = self.editor.begin_file(rel, show=hands)
-                    self._cur_path = path
-                    if hands:
-                        self._bg_ready = False
-                    self._need_refocus = not hands
-                done = self._type_sheet(content) if isinstance(content, list) else self._type_document(content)
-                if not done:
+                if not self._review_static_files(project, write_files):
+                    self._resuming_project = False
                     return
-                with self._act():
-                    if self._hands.is_set():
-                        ok = self.editor.end_file(path, content)
-                    else:
-                        self._flush_disk()
-                        ok = self.editor.verify(path, content) if hasattr(self.editor, "verify") else None
-                self.stats["files"] += 1
-                self.live["done"].append(rel)
-                if self.editor.kind == "office" and path and os.path.exists(path):
-                    try:
-                        with open(path, "rb") as fh:
-                            self.results.append({"name": os.path.basename(path), "project": project,
-                                                 "t": time.time(), "data": fh.read()})
-                    except OSError:
-                        pass
-                if ok is True:
-                    self.stats["verified"] += 1
-                    self.event("verify", f"Verified {rel}", "saved file matches the source")
-                elif ok is False:
-                    self.event("warn", f"{rel} differs", "you typed in it, or the editor changed something")
-                    self.stats["mismatched"] += 1
-                    self.log(f"  {rel}: saved file differs from source (you typed in it, or the editor changed something)")
-                self.activity = "reviewing"
-                if not self._wait(random.uniform(6, 20) * self.cfg.think):   # between files
-                    return
+            else:
+                for i, (rel, content) in enumerate(write_files, 1):
+                    if not self._gate():
+                        return
+                    self.stats.update(file=rel, file_index=i, line=0)
+                    self.live.update(file=rel, text="")
+                    if isinstance(content, list) and self.editor.kind == "office":
+                        self.editor.next_book = content   # preserve original row numbers used in formulas
+                    self.event("create", f"Created {rel}", f"{len(content)} rows" if isinstance(content, list)
+                               else f"{content.count(chr(10)) + 1} lines")
+                    self.log(f"Writing {project}/{rel}")
+                    with self._act():
+                        hands = self._hands.is_set()
+                        if hands and not self._check_click():
+                            hands = False
+                        path = self.editor.begin_file(rel, show=hands)
+                        self._cur_path = path
+                        if hands:
+                            self._bg_ready = False
+                        self._need_refocus = not hands
+                    done = self._type_sheet(content) if isinstance(content, list) else self._type_document(content)
+                    if not done:
+                        return
+                    if self.editor.kind == "office" and self._cur_path:
+                        path = self._cur_path
+                    with self._act():
+                        if self._hands.is_set():
+                            ok = self.editor.end_file(path, content)
+                        elif self.editor.kind == "office":
+                            ok = None       # its completed XLSX was written without GUI input
+                        else:
+                            self._flush_disk()
+                            ok = self.editor.verify(path, content) if hasattr(self.editor, "verify") else None
+                    self.stats["files"] += 1
+                    self.live["done"].append(rel)
+                    if self.editor.kind == "office" and path and os.path.exists(path):
+                        try:
+                            with open(path, "rb") as fh:
+                                self.results.append({"name": os.path.basename(path), "project": project,
+                                                     "t": time.time(), "data": fh.read()})
+                        except OSError:
+                            pass
+                    if ok is True:
+                        self.stats["verified"] += 1
+                        self.event("verify", f"Verified {rel}", "saved file matches the source")
+                    elif ok is False:
+                        self.event("warn", f"{rel} differs", "you typed in it, or the editor changed something")
+                        self.stats["mismatched"] += 1
+                        self.log(f"  {rel}: saved file differs from source (you typed in it, or the editor changed something)")
+                    self.activity = "reviewing"
+                    if not self._wait(random.uniform(6, 20) * self.cfg.think):   # between files
+                        return
             self.log(f"Finished project {project}")
-            self.event("done", f"Finished {project}", f"{len(files)} files written")
+            self.event("done", f"Finished {project}", f"{len(write_files)} files written")
             if self.cfg.terminal_after_project and self.editor.kind == "vscode" \
                     and not self._run_commands(project, meta.get("steps")):
+                self._resuming_project = False
                 return
+            if typeable_project:
+                self.editor.clear_resume_checkpoint()
+            self._resuming_project = False
             self._finish_project()
             if not self._wait(random.uniform(25, 60) * self.cfg.think):
                 return

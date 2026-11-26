@@ -1256,6 +1256,19 @@ def render(d, name):
         ("internal/service/service.go", service_go(d, mod)),
         ("internal/httpapi/httpapi.go", http_go(d, mod)),
         ("internal/service/service_test.go", test_go(d, mod)),
+        ("examples/sample/main.go", f'''// Command sample prints one valid {d.entities[0].human} record.
+package main
+
+import (
+	"fmt"
+
+	"{mod}/internal/service"
+)
+
+func main() {{
+	fmt.Printf("%+v\\n", service.Sample{camel(d.entities[0].name)}(1))
+}}
+'''),
     ]
     main = f'''// Command server runs the {d.title} API on http://127.0.0.1:8080
 package main
@@ -1280,7 +1293,8 @@ func main() {{
 '''
     readme = (f"# {name}\n\n{d.title} service in Go (standard library only).\n\n"
               f"Records: {', '.join(e.name for e in d.entities)}.\n\n"
-              "```bash\ngo test ./...\ngo run ./cmd/server     # http://127.0.0.1:8080/health\n```\n")
+              "```bash\ngo test ./...\ngo run ./cmd/server     # http://127.0.0.1:8080/health\n"
+              "go run ./examples/sample\n```\n")
     scaffold = [("go.mod", f"module {mod}\n\ngo 1.22\n"), ("cmd/server/main.go", main), ("README.md", readme)]
     first = d.entities[0].path
     steps = [

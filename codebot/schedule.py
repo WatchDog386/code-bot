@@ -1,14 +1,10 @@
-"""Daily schedule: start by itself at a set time (default 03:00) and run at most N hours a
-day (default 10). The day runs from one start time to the next, so with 03:00 / 10 h the
-bot works 03:00-13:00 and "today's" hours reset at 03:00 the next morning.
+"""Daily schedule: start by itself at a set time (default 03:00) and run with no time limit.
 
 Rules
-- Inside the window, not stopped by you today, hours left -> it starts by itself (also when
+- On its scheduled day, not stopped by you today -> it starts by itself (also when
   the app is opened at login in the middle of the window).
-- The daily limit always applies, also when you start it by hand: at 10 h it stops and
-  won't start again until the next day.
-- A run the schedule started is stopped when the window ends.
-- If you stop it yourself (Stop / Esc Esc), it stays stopped until the next day's start.
+- There is no daily or run duration limit.
+- If you stop it yourself (Stop / Esc), it stays stopped until the next day's start.
 - Hours used are saved in usage.json, so restarting the computer doesn't reset them.
 """
 
@@ -70,11 +66,20 @@ class Scheduler:
 
     def _save(self):
         keep = dict(sorted(self.usage.items())[-30:])   # a month is plenty
+        temp = self.usage_path + ".tmp"
         try:
-            with open(self.usage_path, "w", encoding="utf-8") as fh:
+            with open(temp, "w", encoding="utf-8", newline="\n") as fh:
                 json.dump(keep, fh, indent=2)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(temp, self.usage_path)
+            return True
         except OSError:
-            pass
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            return False
 
     # ------------------------------------------------------------- queries
     def used(self, now=None, cfg=None):
@@ -82,17 +87,10 @@ class Scheduler:
         return self.usage.get(day_key(now or self.now(), cfg), 0.0)
 
     def cap(self, cfg):
-        return cfg.daily_hours * 3600 if cfg.daily_hours else 0
+        return 0
 
     def allow_start(self):
         """(ok, message) for a manual start."""
-        cfg = self.load_cfg()
-        now = self.now()
-        cap = self.cap(cfg)
-        if cap and self.used(now, cfg) >= cap:
-            start, _ = window(now, cfg)
-            return False, (f"Today's limit of {cfg.daily_hours:g} hours is used up - "
-                           f"it starts again at {cfg.schedule_start} on {(start + timedelta(days=1)):%a %d %b}")
         return True, ""
 
     def status(self):
@@ -133,34 +131,23 @@ class Scheduler:
             step = min(120.0, max(0.0, (now - self._last).total_seconds()))
             self.usage[key] = self.usage.get(key, 0.0) + step
         self._last = now
-        if time.time() - self._saved > 60:
-            self._save()
+        if time.time() - self._saved > 10 and self._save():
             self._saved = time.time()
 
-        # you stopped it (Stop, Esc Esc, time limit): no automatic restart until tomorrow
+        # you stopped it (Stop / Esc): no automatic restart until tomorrow
         if self._was_running and not bot.running and bot.stop_reason != "schedule":
             self.held_day = key
             bot.log(f"Stopped by you - the schedule starts it again at {cfg.schedule_start} tomorrow")
+            if self._save():
+                self._saved = time.time()
         cap = self.cap(cfg)
         used = self.usage.get(key, 0.0)
         start, end = window(now, cfg)
         in_win = start <= now < end
 
-        if bot.running and cap and used >= cap:
-            bot.log(f"Daily limit reached ({cfg.daily_hours:g} hours) - "
-                    f"back at {cfg.schedule_start} tomorrow")
-            bot.event("stop", "Daily limit reached", f"{cfg.daily_hours:g} hours today · back at {cfg.schedule_start}")
-            bot.stop("schedule")
-            self._save()
-        elif bot.running and bot.started_by == "schedule" and self._was_in_window and not in_win:
-            bot.log(f"Today's working hours are over ({start:%H:%M}-{end:%H:%M})")
-            bot.event("stop", "Working hours over", f"back at {cfg.schedule_start} tomorrow")
-            bot.stop("schedule")
-            self._save()
-        elif (cfg.schedule_enabled and not bot.running and in_win and self.held_day != key
+        if (cfg.schedule_enabled and not bot.running and in_win and self.held_day != key
               and (not cap or used < cap) and bot.state in ("idle", "stopped")):
-            bot.log(f"Scheduled start ({cfg.schedule_start}, up to {cfg.daily_hours:g} hours a day; "
-                    f"{fmt_hours(used)} used today)")
+            bot.log(f"Scheduled start ({cfg.schedule_start}, no time limit)")
             ok, _ = bot.start(asdict(cfg))
             if ok:
                 bot.started_by = "schedule"

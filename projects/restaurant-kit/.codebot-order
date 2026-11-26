@@ -3,3 +3,4 @@ src/store.ts
 src/services.ts
 src/queries.ts
 src/selftest.ts
+src/example.ts

@@ -97,7 +97,7 @@ WORKSPACE_SETTINGS = {
     "explorer.confirmDelete": False,
     "git.openRepositoryInParentFolders": "never",
     "extensions.ignoreRecommendations": True,
-    "files.exclude": {"**/.codebot": True, ".vscode": True},
+    "files.exclude": {"**/.codebot": True, "**/.codebot-resume.json": True, ".vscode": True},
     "codebot.managed": True,
 }
 
@@ -160,6 +160,70 @@ class _WindowsFocus:
         except Exception:  # noqa: BLE001  (pygetwindow sometimes raises on success)
             pass
         return "refocused"
+
+    @staticmethod
+    def dismiss_owned_dialog(match):
+        """Safely dismiss a modal dialog owned by the editor window on Windows.
+
+        Escape cancels a dialog without accepting a destructive or ambiguous choice. The
+        owner check prevents a popup in another application from receiving the key.
+        """
+        if not IS_WIN:
+            return False
+        try:
+            import ctypes
+            import pygetwindow as gw
+
+            active = gw.getActiveWindow()
+            if active is None or match(active.title):
+                return False
+            app = next((w for w in gw.getAllWindows() if match(w.title) and w._hWnd), None)
+            if app is None or not active._hWnd:
+                return False
+
+            user32 = ctypes.windll.user32
+            user32.GetWindow.restype = ctypes.c_void_p
+            user32.GetWindow.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            user32.GetWindowTextLengthW.restype = ctypes.c_int
+            user32.GetWindowTextLengthW.argtypes = [ctypes.c_void_p]
+            user32.GetWindowTextW.restype = ctypes.c_int
+            user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+            user32.GetClassNameW.restype = ctypes.c_int
+            user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+            hwnd = int(active._hWnd)
+            app_hwnd = int(app._hWnd)
+            owner = user32.GetWindow(ctypes.c_void_p(hwnd), 4)  # GW_OWNER
+            for _ in range(5):
+                if not owner:
+                    break
+                if int(owner) == app_hwnd:
+                    message = []
+                    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+                    def read_child(child, _):
+                        class_name = ctypes.create_unicode_buffer(64)
+                        user32.GetClassNameW(child, class_name, len(class_name))
+                        if class_name.value not in ("Static", "Text", "SysLink"):
+                            return True
+                        length = user32.GetWindowTextLengthW(child)
+                        if 0 < length <= 2000:
+                            text = ctypes.create_unicode_buffer(length + 1)
+                            user32.GetWindowTextW(child, text, len(text))
+                            if text.value.strip():
+                                message.append(text.value.strip())
+                        return True
+
+                    callback = callback_type(read_child)
+                    user32.EnumChildWindows.argtypes = [ctypes.c_void_p, callback_type, ctypes.c_void_p]
+                    user32.EnumChildWindows(ctypes.c_void_p(hwnd), callback, None)
+                    human.press_esc()
+                    time.sleep(0.2)
+                    detail = " · ".join(dict.fromkeys(message))
+                    return (active.title or "untitled dialog") + (f": {detail[:240]}" if detail else "")
+                owner = user32.GetWindow(ctypes.c_void_p(int(owner)), 4)
+            return False
+        except Exception:  # noqa: BLE001
+            return False
 
 
 def active_window_title():
@@ -397,6 +461,11 @@ class VSCodeEditor:
         window_up = self._launched and self.is_open()
         ours = self._ours()
         keep = [n for n in ours if n != name] if self.keep_finished else []
+        pending = [n for n in ours
+                   if os.path.isfile(os.path.join(self.ws, n, ".codebot-resume.json"))]
+        keep = sorted(set(keep) | set(pending))
+        if pending and not self.keep_finished:
+            self.log(f"Preserving {len(pending)} unfinished project folder(s) in the workspace")
         self.cleanup(keep=keep)            # workspace = just the project being written
         dest = os.path.join(self.ws, name)
         if os.path.exists(dest):            # a folder we didn't create: never touch it
@@ -416,10 +485,141 @@ class VSCodeEditor:
             self._open_folder(dest, reuse=window_up)
         time.sleep(1.0)
 
-    def begin_file(self, rel, show=True):
+    def find_resume_checkpoint(self):
+        """Return the newest unfinished project snapshot owned by this workspace."""
+        candidates = []
+        for folder in self._ours():
+            root = os.path.join(self.ws, folder)
+            checkpoint = os.path.join(root, ".codebot-resume.json")
+            try:
+                if os.path.getsize(checkpoint) > 5_000_000:
+                    continue
+                with open(checkpoint, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if (data.get("version") != 1 or data.get("folder") != folder
+                        or not isinstance(data.get("project"), str)
+                        or not isinstance(data.get("files"), list)):
+                    continue
+                files = []
+                valid = True
+                for item in data["files"]:
+                    if not isinstance(item, dict) or not isinstance(item.get("path"), str) \
+                            or not isinstance(item.get("text"), str):
+                        valid = False
+                        break
+                    rel = item["path"].replace("\\", "/")
+                    native = os.path.normpath(rel)
+                    if (not rel or rel.startswith("/") or ":" in rel.split("/")[0]
+                            or native in (".", "..") or native.startswith(".." + os.sep)):
+                        valid = False
+                        break
+                    files.append((rel, item["text"]))
+                if valid and files:
+                    data["files"] = files
+                    data["root"] = root
+                    data["_mtime"] = os.path.getmtime(checkpoint)
+                    candidates.append(data)
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item["_mtime"])
+
+    def save_resume_checkpoint(self, project, files, steps=None):
+        """Persist the exact source snapshot so a stopped project can continue after restart."""
+        if not self.project_dir:
+            return False
+        data = {
+            "version": 1,
+            "project": project,
+            "folder": os.path.basename(self.project_dir),
+            "updated": time.time(),
+            "files": [{"path": rel.replace("\\", "/"), "text": text} for rel, text in files],
+            "steps": steps or [],
+        }
+        path = os.path.join(self.project_dir, ".codebot-resume.json")
+        temp = path + ".tmp"
+        try:
+            with open(temp, "w", encoding="utf-8", newline="\n") as fh:
+                json.dump(data, fh, ensure_ascii=True)
+            os.replace(temp, path)
+            return True
+        except OSError as exc:
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            self.log(f"Couldn't save the project resume point: {exc}")
+            return False
+
+    def resume_project(self, folder, interactive=True):
+        """Reopen an unfinished bot-owned project without clearing its files."""
+        if folder not in self._ours() or folder in ("", ".", "..") or "/" in folder or "\\" in folder:
+            raise ValueError("resume folder is not a bot-owned project")
+        dest = os.path.abspath(os.path.join(self.ws, folder))
+        if os.path.dirname(dest) != os.path.abspath(self.ws) or not os.path.isdir(dest):
+            raise ValueError("resume project folder is missing")
+        self.root_name = folder
+        window_up = self.is_open() if IS_WIN else self._launched and self.is_open()
+        self.project_dir = dest
+        self._write_settings(dest)
+        self.log(f"Resuming project: {folder}")
+        if self.cli:
+            if window_up:
+                self.focus(force=True)
+                time.sleep(0.4)
+            self._open_folder(dest, reuse=window_up)
+        time.sleep(0.5)
+
+    def clear_resume_checkpoint(self):
+        """Remove the resume snapshot only after the project is complete."""
+        if not self.project_dir:
+            return
+        try:
+            os.remove(os.path.join(self.project_dir, ".codebot-resume.json"))
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            self.log(f"Couldn't clear the completed project's resume point: {exc}")
+
+    def write_repaired_file(self, rel, text):
+        """Save a reviewed correction inside the active project folder."""
+        if not self.project_dir:
+            return False
+        path = os.path.abspath(os.path.join(self.project_dir, *rel.replace("\\", "/").split("/")))
+        if os.path.commonpath((os.path.abspath(self.project_dir), path)) != os.path.abspath(self.project_dir):
+            raise ValueError("refusing to write a correction outside the active project")
+        temp = path + ".codebot-tmp"
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(temp, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+            os.replace(temp, path)
+            return True
+        except OSError as exc:
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            self.log(f"Couldn't save the correction to {rel}: {exc}")
+            return False
+
+    def prepare_files(self, files, stopped=None):
+        """Create every source file before typing begins; never overwrite an existing file."""
+        for rel, _ in files:
+            if stopped and stopped():
+                return False
+            path = os.path.join(self.project_dir, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if not os.path.exists(path):
+                open(path, "w", encoding="utf-8").close()
+        return True
+
+    def begin_file(self, rel, show=True, truncate=True):
         path = os.path.join(self.project_dir, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        open(path, "w", encoding="utf-8").close()
+        if truncate or not os.path.exists(path):
+            open(path, "w", encoding="utf-8").close()
         if show:
             self.show_file(path)
         return path
@@ -436,10 +636,24 @@ class VSCodeEditor:
         if self.is_active() is not False:
             self.focus_editor()
 
+    def resume_file(self, path):
+        """Reopen an existing file and put the caret after its last typed line."""
+        self.show_file(path)
+        pyautogui.hotkey(*doc_end_keys())
+        time.sleep(0.15)
+
+    def handle_popup(self):
+        """Cancel an owned modal dialog, if one is blocking VS Code."""
+        return _WindowsFocus.dismiss_owned_dialog(self._title_match)
+
     def end_file(self, path, expected):
-        pyautogui.hotkey("command" if IS_MAC else "ctrl", "s")
-        time.sleep(1.0)
+        self.save_chunk(path)
         return self.verify(path, expected)
+
+    def save_chunk(self, path=None):
+        """Save a partial pass without checking it against the full source file."""
+        pyautogui.hotkey("command" if IS_MAC else "ctrl", "s")
+        time.sleep(0.35)
 
     def verify(self, path, expected):
         try:

@@ -1,14 +1,23 @@
 """Project library: every folder in ./projects is a project the bot can 'write'.
 
-Drop any real project folder in there and the bot will type it file by file.
+Drop any real project folder in there or import it from a ZIP in the dashboard; the bot types
+supported files file by file.
 An optional `.codebot-order` file lists the files in the order to type them.
 """
 
+import io
+import json
 import os
 import random
 import re
 import shutil
+import stat
 import sys
+import tempfile
+import threading
+import zipfile
+import zlib
+from .storage import PROJECT_UPLOADS_DIR
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECTS_DIR = os.path.join(HERE, "projects")
@@ -17,22 +26,50 @@ TEXT_EXT = {
     ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".kt", ".rs", ".rb", ".php", ".cs",
     ".c", ".h", ".cpp", ".hpp", ".swift", ".sql", ".html", ".css", ".scss", ".json", ".yaml",
     ".yml", ".toml", ".md", ".txt", ".sh", ".mod", ".cfg", ".ini", ".env", ".xml", ".vue",
+    ".svelte", ".mdx", ".rst", ".csproj", ".sln", ".props", ".targets", ".lock", ".properties",
+    ".gradle", ".bat", ".ps1", ".dockerignore", ".editorconfig", ".gitattributes", ".yarnrc",
 }
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".idea", ".vscode"}
 MAX_FILE_BYTES = 400_000
+PROJECT_UPLOAD_MAX_BYTES = 50_000_000
+PROJECT_UPLOAD_MAX_FILES = 2_500
+PROJECT_UPLOAD_MAX_EXPANDED = 150_000_000
+UPLOAD_MARKER = ".codebot-upload.json"
+_UPLOAD_LOCK = threading.Lock()
+_TYPEABLE_NAMES = {
+    "Dockerfile", "Makefile", "CMakeLists.txt", "Procfile", ".gitignore", ".dockerignore",
+    ".editorconfig", ".gitattributes", ".npmrc", ".nvmrc", ".python-version", ".env",
+    "LICENSE", "NOTICE", "AUTHORS", "CHANGELOG", "CONTRIBUTING", "Gemfile", "Rakefile",
+    "Justfile", "Brewfile",
+}
+_PROJECT_ROOT_DIRS = {
+    "src", "app", "lib", "docs", "test", "tests", "examples", "public", "static", "cmd",
+    "internal", "pkg", "include", "assets", "scripts", "config", "bin", "backend", "frontend",
+}
 
 
 def list_projects():
-    if not os.path.isdir(PROJECTS_DIR):
-        return []
-    return sorted(d for d in os.listdir(PROJECTS_DIR)
-                  if os.path.isdir(os.path.join(PROJECTS_DIR, d)) and not d.startswith("."))
+    names = set()
+    for root in (PROJECTS_DIR, PROJECT_UPLOADS_DIR):
+        if os.path.isdir(root):
+            names.update(d for d in os.listdir(root)
+                         if os.path.isdir(os.path.join(root, d)) and not d.startswith("."))
+    return sorted(names)
+
+
+def _project_path(name):
+    """Resolve built-in projects and locally stored uploaded projects."""
+    for root in (PROJECTS_DIR, PROJECT_UPLOADS_DIR):
+        path = os.path.join(root, name)
+        if os.path.isdir(path):
+            return path
+    return os.path.join(PROJECTS_DIR, name)
 
 
 def _is_typeable(path):
     ext = os.path.splitext(path)[1].lower()
     name = os.path.basename(path)
-    if ext not in TEXT_EXT and name not in ("Dockerfile", "Makefile", ".gitignore"):
+    if ext not in TEXT_EXT and name not in _TYPEABLE_NAMES:
         return False
     try:
         if os.path.getsize(path) > MAX_FILE_BYTES:
@@ -41,12 +78,203 @@ def _is_typeable(path):
             text = fh.read()
     except (OSError, UnicodeDecodeError):
         return False
-    return all(ch in "\n\t" or 32 <= ord(ch) < 127 for ch in text)  # plain ASCII only
+    return _is_typeable_text(name, text)
+
+
+def _is_typeable_text(name, text):
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in TEXT_EXT and name not in _TYPEABLE_NAMES:
+        return False
+    if len(text.encode("utf-8")) > MAX_FILE_BYTES:
+        return False
+    return all(ch in "\n\r\t" or 32 <= ord(ch) < 127 for ch in text)  # plain ASCII only
+
+
+def uploaded_projects():
+    """Uploaded projects that can be removed from the library."""
+    out = []
+    for name in list_projects():
+        folder = _project_path(name)
+        marker = os.path.join(folder, UPLOAD_MARKER)
+        try:
+            with open(marker, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if data.get("managed_by") == "invotech360-project-upload":
+                out.append({"name": name, "archive": data.get("archive", name),
+                            "files": int(data.get("files", 0))})
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+    return out
+
+
+def import_project_archive(filename, payload):
+    """Import supported plain-text files from a ZIP into the project library.
+
+    Archive paths are validated before extraction; binary files and common dependency/build
+    folders are skipped. The order list preserves the archive's file order.
+    """
+    if not isinstance(payload, bytes) or not payload:
+        raise ValueError("The ZIP file is empty")
+    if len(payload) > PROJECT_UPLOAD_MAX_BYTES:
+        raise ValueError("ZIP files must be 50 MB or smaller")
+    raw_name = str(filename or "project.zip").replace("\\", "/").rsplit("/", 1)[-1]
+    if not raw_name.lower().endswith(".zip"):
+        raise ValueError("Choose a .zip file containing your project folder")
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(payload))
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise ValueError("That file is not a readable ZIP archive") from exc
+
+    candidates = []
+    order_entry = None
+    skipped = 0
+    expanded = 0
+    infos = archive.infolist()
+    if len(infos) > 10_000:
+        raise ValueError("The ZIP has too many entries")
+    for info in infos:
+        if info.is_dir():
+            continue
+        mode = (info.external_attr >> 16) & 0o170000
+        if stat.S_ISLNK(mode):
+            raise ValueError("ZIP projects cannot contain symbolic links")
+        if mode and mode != stat.S_IFREG:
+            raise ValueError("The ZIP contains a non-regular file")
+        if info.flag_bits & 0x1:
+            raise ValueError("Encrypted ZIP files are not supported")
+        rel = info.filename.replace("\\", "/")
+        parts = rel.split("/")
+        if (not rel or rel.startswith("/") or any(":" in part for part in parts)
+                or any(part in ("", ".", "..") for part in parts)):
+            raise ValueError("The ZIP contains an unsafe file path")
+        if any(part in SKIP_DIRS or part == "__MACOSX" for part in parts[:-1]):
+            skipped += 1
+            continue
+        basename = parts[-1]
+        if basename == ".codebot-order":
+            if len(parts) <= 2 and info.file_size <= 200_000:
+                order_entry = (parts, info)
+            continue
+        if basename.startswith(".codebot") or basename == ".DS_Store":
+            skipped += 1
+            continue
+        if os.path.splitext(basename)[1].lower() not in TEXT_EXT and basename not in _TYPEABLE_NAMES:
+            skipped += 1
+            continue
+        if info.file_size > MAX_FILE_BYTES:
+            skipped += 1
+            continue
+        expanded += info.file_size
+        if expanded > PROJECT_UPLOAD_MAX_EXPANDED:
+            raise ValueError("The ZIP contains too much project source text")
+        try:
+            content = archive.read(info)
+            text = content.decode("utf-8-sig")
+            content = text.encode("utf-8")
+        except (UnicodeDecodeError, RuntimeError, EOFError, zlib.error, zipfile.BadZipFile, NotImplementedError):
+            skipped += 1
+            continue
+        if not _is_typeable_text(basename, text):
+            skipped += 1
+            continue
+        if len(candidates) >= PROJECT_UPLOAD_MAX_FILES:
+            raise ValueError("The ZIP has too many supported project files")
+        candidates.append((parts, content))
+
+    if not candidates:
+        raise ValueError("No supported plain-text project files were found in that ZIP")
+    if len(candidates) > PROJECT_UPLOAD_MAX_FILES:
+        raise ValueError("The ZIP has too many supported project files")
+
+    first_parts = {parts[0] for parts, _ in candidates}
+    has_root_files = any(len(parts) == 1 for parts, _ in candidates)
+    only_root = next(iter(first_parts)) if len(first_parts) == 1 else None
+    archive_stem = os.path.splitext(raw_name)[0].casefold()
+    strip_root = (only_root if only_root and not has_root_files
+                  and (only_root.casefold() == archive_stem or only_root.casefold() not in _PROJECT_ROOT_DIRS)
+                  else None)
+    files = []
+    seen = set()
+    for parts, content in candidates:
+        rel_parts = parts[1:] if strip_root and parts[0] == strip_root else parts
+        rel = "/".join(rel_parts)
+        if not rel or rel.casefold() in seen:
+            raise ValueError("The ZIP has duplicate project file paths")
+        seen.add(rel.casefold())
+        files.append((rel, content))
+
+    requested = []
+    if order_entry:
+        parts, info = order_entry
+        rel_parts = parts[1:] if strip_root and parts[0] == strip_root else parts
+        if rel_parts == [".codebot-order"]:
+            try:
+                order_text = archive.read(info).decode("ascii")
+                requested = [line.strip().replace("\\", "/") for line in order_text.splitlines()
+                             if line.strip() and not line.lstrip().startswith("#")]
+            except (UnicodeDecodeError, RuntimeError, EOFError, zlib.error, zipfile.BadZipFile):
+                requested = []
+    ordered = []
+    remaining = dict(files)
+    for rel in requested:
+        if rel in remaining:
+            ordered.append(rel)
+            remaining.pop(rel)
+    ordered.extend(rel for rel, _ in files if rel in remaining)
+    file_data = dict(files)
+
+    stem = os.path.splitext(raw_name)[0]
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", stem).strip("-_-")[:48].lower() or "uploaded-project"
+    with _UPLOAD_LOCK:
+        name = slug
+        suffix = 2
+        while any(os.path.lexists(os.path.join(root, name)) for root in (PROJECTS_DIR, PROJECT_UPLOADS_DIR)):
+            name = f"{slug}-{suffix}"
+            suffix += 1
+        os.makedirs(PROJECT_UPLOADS_DIR, exist_ok=True)
+        staging = tempfile.mkdtemp(prefix=".codebot-upload-", dir=PROJECT_UPLOADS_DIR)
+        try:
+            for rel in ordered:
+                path = os.path.join(staging, *rel.split("/"))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as fh:
+                    fh.write(file_data[rel])
+            with open(os.path.join(staging, ".codebot-order"), "w", encoding="ascii", newline="\n") as fh:
+                fh.write("\n".join(ordered) + "\n")
+            with open(os.path.join(staging, UPLOAD_MARKER), "w", encoding="utf-8", newline="\n") as fh:
+                json.dump({"managed_by": "invotech360-project-upload", "archive": raw_name,
+                           "files": len(ordered)}, fh, indent=2)
+            os.replace(staging, os.path.join(PROJECT_UPLOADS_DIR, name))
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+    return {"name": name, "files": len(ordered), "skipped": skipped}
+
+
+def delete_uploaded_project(name):
+    """Delete only a direct child project carrying our upload marker."""
+    if not isinstance(name, str) or not name or name in (".", "..") or "/" in name or "\\" in name:
+        return False
+    roots = {os.path.abspath(root) for root in (PROJECTS_DIR, PROJECT_UPLOADS_DIR)}
+    folder = os.path.abspath(_project_path(name))
+    if os.path.dirname(folder) not in roots or os.path.islink(folder) or not os.path.isdir(folder):
+        return False
+    marker = os.path.join(folder, UPLOAD_MARKER)
+    try:
+        with open(marker, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if data.get("managed_by") != "invotech360-project-upload":
+            return False
+    except (OSError, ValueError, AttributeError):
+        return False
+    shutil.rmtree(folder)
+    return True
 
 
 def project_files(name):
     """Return [(relative_path, content), ...] in typing order."""
-    root = os.path.join(PROJECTS_DIR, name)
+    root = _project_path(name)
     order_file = os.path.join(root, ".codebot-order")
     rels = []
     if os.path.exists(order_file):
@@ -80,7 +308,7 @@ def project_files(name):
 def project_scaffold(name, typed):
     """Files of a library project that aren't typed (not in its .codebot-order): they're
     put in place instantly when the project starts (go.mod, package.json, README...)."""
-    root = os.path.join(PROJECTS_DIR, name)
+    root = _project_path(name)
     if not os.path.exists(os.path.join(root, ".codebot-order")):
         return []
     typed = set(typed)
@@ -127,7 +355,7 @@ def project_commands(name):
         open: http://127.0.0.1:8000/docs                <- shown in VS Code's browser
     Without one, a safe default is picked from the project type.
     """
-    root = os.path.join(PROJECTS_DIR, name)
+    root = _project_path(name)
     run_file = os.path.join(root, ".codebot-run")
     lines = []
     if os.path.exists(run_file):

@@ -3,3 +3,4 @@ clinic_service/repository.py
 clinic_service/services.py
 clinic_service/api.py
 tests/test_clinic.py
+examples/sample_data.py

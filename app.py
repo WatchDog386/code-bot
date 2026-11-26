@@ -7,14 +7,16 @@ Invotech 360 control panel, served at http://localhost:8765
     python app.py --open-editor    # also opens VS Code right away
     python app.py --port 9000 --no-browser
 
-Kill switch (anywhere): press Esc twice quickly. F9 = pause/resume.
-It never stops on its own: only Esc Esc, Stop, or the time limit end a run.
+Kill switch (anywhere): press Esc once. F9 = pause/resume.
+It never stops on its own: only Esc or Stop end a run.
 """
 
 import argparse
 import json
 import os
+import shutil
 import sys
+import tempfile
 import threading
 import webbrowser
 from urllib.parse import parse_qs, urlparse
@@ -22,17 +24,27 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
     from codebot.engine import Bot, Config, monitors_info
-    from codebot.projects import list_projects, project_files
+    from codebot.projects import (PROJECT_UPLOAD_MAX_BYTES, delete_uploaded_project, import_project_archive,
+                                 list_projects, project_files, uploaded_projects)
     from codebot.sheets import list_sheet_projects
     from codebot.snippets import LANGUAGES
     from codebot.gen import LANGUAGES as GEN_LANGUAGES
     from codebot.gen.schema import DOMAINS as GEN_DOMAINS
+    from codebot.storage import SETTINGS_FILE, USAGE_FILE, ensure_data_dir
 except ImportError as exc:
     print(f"Missing dependency ({exc}). Run:\n    python -m pip install -r requirements.txt")
     sys.exit(1)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SETTINGS = os.path.join(HERE, "settings.json")
+ensure_data_dir()
+SETTINGS = SETTINGS_FILE
+LEGACY_SETTINGS = os.path.join(HERE, "settings.json")
+LEGACY_USAGE = os.path.join(HERE, "usage.json")
+if not os.path.exists(USAGE_FILE) and os.path.isfile(LEGACY_USAGE):
+    try:
+        shutil.copy2(LEGACY_USAGE, USAGE_FILE)
+    except OSError:
+        pass
 INDEX = os.path.join(HERE, "web", "index.html")
 FAVICON = os.path.join(HERE, "web", "favicon.png")
 
@@ -40,16 +52,18 @@ bot = Bot()
 
 
 def load_settings():
-    try:
-        with open(SETTINGS, encoding="utf-8") as fh:
-            return Config.from_dict(json.load(fh))
-    except (OSError, ValueError):
-        return Config()
+    for path in (SETTINGS, LEGACY_SETTINGS):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return Config.from_dict(json.load(fh))
+        except (OSError, ValueError):
+            continue
+    return Config()
 
 
 from codebot.schedule import Scheduler  # noqa: E402
 
-scheduler = Scheduler(bot, lambda: load_settings(), os.path.join(HERE, "usage.json"))
+scheduler = Scheduler(bot, lambda: load_settings(), USAGE_FILE)
 
 
 def start_by_hand(body):
@@ -63,6 +77,7 @@ def start_by_hand(body):
 def save_settings(cfg_dict):
     from dataclasses import asdict
     try:
+        ensure_data_dir()
         with open(SETTINGS, "w", encoding="utf-8") as fh:
             json.dump(asdict(Config.from_dict(cfg_dict)), fh, indent=2)
     except OSError:
@@ -110,6 +125,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"uploads": uploaded(), "projects": list_sheet_projects(), "results": [
                 {"i": i, "name": r["name"], "project": r["project"], "t": r["t"], "size": len(r["data"])}
                 for i, r in enumerate(bot.results)]})
+        if url.path == "/api/project-uploads":
+            return self._send(200, {"uploads": uploaded_projects()})
         if url.path.startswith("/api/results/"):
             try:
                 r = list(bot.results)[int(url.path.rsplit("/", 1)[1])]
@@ -153,7 +170,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/manifest.webmanifest":
             return self._send(200, {
                 "id": "/", "name": "Invotech 360", "short_name": "Invotech 360",
-                "description": "Coding agent dashboard", "start_url": "/", "scope": "/",
+                "description": "Invotech 360 task dashboard", "start_url": "/", "scope": "/",
                 "display": "standalone", "background_color": "#0E2135", "theme_color": "#0E2135",
                 "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
                           {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
@@ -179,6 +196,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "generator": {"languages": list(GEN_LANGUAGES),
                                                   "domains": {k: v[0] for k, v in GEN_DOMAINS.items()}},
                                     "projects": list_projects(), "sheet_projects": list_sheet_projects(),
+                                    "uploaded_projects": uploaded_projects(),
                                     "monitors": monitors_info()})
         self._send(404, {"error": "not found"})
 
@@ -188,25 +206,69 @@ class Handler(BaseHTTPRequestHandler):
         if origin and not origin.startswith(("http://localhost", "http://127.0.0.1")):
             return self._send(403, {"error": "forbidden"})
         if self.path.startswith("/api/sheets/upload"):
-            # your own workbook (.xlsx / .csv) to be typed into WPS Office
-            from codebot.sheets import UPLOADS
+            # your own workbook (.xlsx / .xlsm / .xls / .csv) to be typed into WPS Office
+            from codebot.sheets import UPLOADS, is_upload_name, validate_workbook
             name = os.path.basename(parse_qs(urlparse(self.path).query).get("name", [""])[0])
-            length = int(self.headers.get("Content-Length") or 0)
-            if not name.lower().endswith((".xlsx", ".csv")) or not 0 < length <= 20_000_000:
-                return self._send(400, {"ok": False, "message": "Upload an .xlsx or .csv file (up to 20 MB)"})
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if not is_upload_name(name) or not 0 < length <= 20_000_000:
+                return self._send(400, {"ok": False, "message": "Upload an Excel workbook (.xlsx, .xlsm, .xls) or .csv file (up to 20 MB)"})
             os.makedirs(UPLOADS, exist_ok=True)
-            with open(os.path.join(UPLOADS, name), "wb") as fh:
-                fh.write(self.rfile.read(length))
+            ext = os.path.splitext(name)[1].lower()
+            handle, temp_path = tempfile.mkstemp(prefix=".upload-", suffix=ext, dir=UPLOADS)
+            try:
+                with os.fdopen(handle, "wb") as fh:
+                    remaining = length
+                    while remaining:
+                        chunk = self.rfile.read(min(remaining, 1 << 16))
+                        if not chunk:
+                            raise OSError("the upload ended before all bytes arrived")
+                        fh.write(chunk)
+                        remaining -= len(chunk)
+                validate_workbook(temp_path)
+                os.replace(temp_path, os.path.join(UPLOADS, name))
+            except ValueError as exc:
+                return self._send(400, {"ok": False, "message": str(exc)})
+            except OSError as exc:
+                return self._send(400, {"ok": False, "message": f"Couldn't save {name}: {exc}"})
+            finally:
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
             return self._send(200, {"ok": True, "message": f"{name} added - it will be typed into WPS Office"})
+        if urlparse(self.path).path == "/api/projects/upload":
+            name = os.path.basename(parse_qs(urlparse(self.path).query).get("name", [""])[0])
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if not name.lower().endswith(".zip") or not 0 < length <= PROJECT_UPLOAD_MAX_BYTES:
+                return self._send(400, {"ok": False, "message": "Upload a project ZIP up to 50 MB"})
+            try:
+                imported = import_project_archive(name, self.rfile.read(length))
+            except (ValueError, OSError) as exc:
+                return self._send(400, {"ok": False, "message": str(exc)})
+            except Exception as exc:  # keep upload failures readable in the dashboard
+                print(f"Project ZIP import failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+                return self._send(500, {"ok": False, "message": "The server couldn't save this ZIP to its local database."})
+            message = f"Imported {name} as {imported['name']} ({imported['files']} text files)"
+            if imported["skipped"]:
+                message += (f"; skipped {imported['skipped']} unsupported, non-ASCII, binary, "
+                            "dependency, or oversized files")
+            return self._send(200, {"ok": True, "message": message, "project": imported})
         body = self._body()
         if self.path == "/api/sheets/delete":
-            from codebot.sheets import UPLOADS
-            name = os.path.basename(body.get("name", ""))
-            try:
-                os.remove(os.path.join(UPLOADS, name))
-            except OSError:
-                pass
-            return self._send(200, {"ok": True})
+            from codebot.sheets import delete_uploaded
+            deleted = delete_uploaded(body.get("name", ""))
+            return self._send(200, {"ok": deleted})
+        if self.path == "/api/projects/delete":
+            deleted = delete_uploaded_project(body.get("name", ""))
+            return self._send(200, {"ok": deleted, "message": "Uploaded project removed" if deleted
+                                    else "That project is not an uploaded project"})
         routes = {
             "/api/start": lambda: (save_settings(body), start_by_hand(body))[1],
             "/api/stop": lambda: bot.stop("user"),
@@ -292,8 +354,8 @@ def main():
     hot = bot.start_listeners()
     print("=" * 56)
     print(f"  Invotech 360 dashboard:  {url}")
-    print("  Kill switch: press Esc TWICE quickly.  F9 = pause/resume" if hot else
-          "  (install pynput for the Esc-Esc kill switch)")
+    print("  Kill switch: press Esc once.  F9 = pause/resume" if hot else
+          "  (install pynput for the Esc kill switch)")
     print("  Use your mouse/keyboard any time - the bot pauses and waits for you")
     print("  Quit server: Ctrl+C")
     print("=" * 56, flush=True)
@@ -301,8 +363,8 @@ def main():
     cfg = load_settings()
     if cfg.schedule_enabled and not args.no_schedule:
         st = scheduler.status()
-        print(f"  Schedule: every day from {cfg.schedule_start}, up to {cfg.daily_hours:g} hours "
-              f"({st['used_text']} used today; next start: {st['next_start_text']})", flush=True)
+        print(f"  Schedule: every day from {cfg.schedule_start}, no time limit "
+              f"(next start: {st['next_start_text']})", flush=True)
     if not args.no_schedule:
         if not args.background:
             # opened by hand: just the dashboard - you pick the project and press Start.

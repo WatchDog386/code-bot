@@ -1010,6 +1010,11 @@ def render(d, name):
         ("src/services.ts", services_ts(d)),
         ("src/queries.ts", queries_ts(d)),
         ("src/selftest.ts", selftest_ts(d)),
+        ("src/example.ts", f'''/** Print a valid example {d.entities[0].human} payload as JSON. */
+import {{ sample{d.entities[0].name} }} from "./services";
+
+console.log(JSON.stringify(sample{d.entities[0].name}(1), null, 2));
+'''),
     ]
     package = ('{\n  "name": "' + name + '",\n  "version": "0.1.0",\n  "private": true,\n'
                '  "scripts": {\n    "build": "tsc -p .",\n    "test": "node dist/selftest.js"\n  },\n'
@@ -1019,7 +1024,7 @@ def render(d, name):
                 '    "rootDir": "src"\n  },\n  "include": ["src"]\n}\n')
     readme = (f"# {name}\n\n{d.title} kit in strict TypeScript (no runtime dependencies).\n\n"
               f"Records: {', '.join(e.name for e in d.entities)}.\n\n"
-              "```bash\nnpm install\nnpx tsc -p .\nnode dist/selftest.js\n```\n")
+              "```bash\nnpm install\nnpx tsc -p .\nnode dist/selftest.js\nnode dist/example.js\n```\n")
     scaffold = [("package.json", package), ("tsconfig.json", tsconfig), ("README.md", readme),
                 (".gitignore", "node_modules/\ndist/\n")]
     steps = [

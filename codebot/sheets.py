@@ -7,10 +7,12 @@ rows are lists of cell texts ("=SUM(B2:B9)" for formulas).
 
 import csv
 import os
+import posixpath
 import random
 import re
 import zipfile
 from xml.etree import ElementTree as ET
+from .storage import SHEET_UPLOADS_DIR
 
 FIRST = ["Amina", "Brian", "Cynthia", "David", "Esther", "Felix", "Grace", "Hassan", "Irene", "James", "Kevin",
          "Lucy", "Mercy", "Nelson", "Olive", "Peter", "Queen", "Rose", "Samuel", "Tabitha", "Victor", "Wanjiku"]
@@ -232,17 +234,58 @@ def _old_generate(seed=None, count=None):
 
 
 # ------------------------------------------------------------- your own workbooks
-UPLOADS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sheets")
+UPLOADS = SHEET_UPLOADS_DIR
+LEGACY_UPLOADS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sheets")
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 MAX_ROWS, MAX_COLS = 3000, 80
+UPLOAD_EXTS = (".xlsx", ".xlsm", ".xls", ".csv")
+
+
+def is_upload_name(name):
+    """A workbook filename we can store and type (never a temp, hidden or lock file)."""
+    return (isinstance(name, str) and bool(name)
+            and os.path.basename(name) == name
+            and not name.startswith((".", "~$"))
+            and name.lower().endswith(UPLOAD_EXTS))
 
 
 def uploaded():
     """Workbooks you uploaded (Projects > Upload Excel), newest first."""
-    if not os.path.isdir(UPLOADS):
-        return []
-    files = [f for f in os.listdir(UPLOADS) if f.lower().endswith((".xlsx", ".csv")) and not f.startswith("~$")]
-    return sorted(files, key=lambda f: -os.path.getmtime(os.path.join(UPLOADS, f)))
+    found = {}
+    for root in (LEGACY_UPLOADS, UPLOADS):
+        if not os.path.isdir(root):
+            continue
+        for name in os.listdir(root):
+            path = os.path.join(root, name)
+            if is_upload_name(name) and os.path.isfile(path):
+                if name not in found or os.path.getmtime(path) > os.path.getmtime(found[name]):
+                    found[name] = path
+    return sorted(found, key=lambda name: -os.path.getmtime(found[name]))
+
+
+def uploaded_path(name):
+    """Resolve a direct child workbook path, preferring the local database copy."""
+    if not isinstance(name, str) or not name or os.path.basename(name) != name:
+        return None
+    for root in (UPLOADS, LEGACY_UPLOADS):
+        path = os.path.join(root, name)
+        if os.path.isfile(path):
+            return path
+    return os.path.join(UPLOADS, name)
+
+
+def delete_uploaded(name):
+    """Delete a workbook by basename from the current or legacy upload folder."""
+    if not isinstance(name, str) or not name or os.path.basename(name) != name:
+        return False
+    deleted = False
+    for root in (UPLOADS, LEGACY_UPLOADS):
+        try:
+            os.remove(os.path.join(root, name))
+            deleted = True
+        except OSError:
+            pass
+    return deleted
 
 
 def _col_index(ref):
@@ -254,80 +297,205 @@ def _col_index(ref):
 
 
 def read_rows(path):
-    """Rows of cell texts from a .csv or the first sheet of an .xlsx (formulas as '=...')."""
-    if path.lower().endswith(".csv"):
+    """Read cell text from a CSV, an .xlsx/.xlsm workbook, or an old .xls workbook.
+
+    Formulas in .xlsx/.xlsm are kept as '=...'; .xls yields the cached values (it has no
+    portable formula reader)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".csv":
         with open(path, newline="", encoding="utf-8-sig", errors="replace") as fh:
             return [row[:MAX_COLS] for row in csv.reader(fh)][:MAX_ROWS]
+    if ext == ".xls":
+        return _read_xls(path)
+    from .books import SHEET
+
     with zipfile.ZipFile(path) as z:
         shared = []
         if "xl/sharedStrings.xml" in z.namelist():
             root = ET.fromstring(z.read("xl/sharedStrings.xml"))
             for si in root.findall("m:si", NS):
                 shared.append("".join(t.text or "" for t in si.iter(f"{{{NS['m']}}}t")))
-        sheets = sorted(n for n in z.namelist() if re.match(r"xl/worksheets/sheet\d+\.xml$", n))
-        if not sheets:
-            return []
-        root = ET.fromstring(z.read(sheets[0]))
-    grid = {}
-    for c in root.iter(f"{{{NS['m']}}}c"):
-        ref = c.get("r")
-        if not ref:
+        workbook = None
+        if "xl/workbook.xml" in z.namelist():
+            workbook = ET.fromstring(z.read("xl/workbook.xml"))
+        targets = {}
+        rel_path = "xl/_rels/workbook.xml.rels"
+        if rel_path in z.namelist():
+            rel_root = ET.fromstring(z.read(rel_path))
+            for rel in rel_root:
+                target = rel.get("Target", "")
+                if target:
+                    targets[rel.get("Id")] = posixpath.normpath(
+                        target.lstrip("/") if target.startswith("/") else posixpath.join("xl", target))
+        sheet_nodes = workbook.findall("m:sheets/m:sheet", NS) if workbook is not None else []
+        sheet_files = []
+        for node in sheet_nodes:
+            title = node.get("name", "Sheet")
+            rel_id = node.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+            target = targets.get(rel_id)
+            if target in z.namelist():
+                sheet_files.append((title, target))
+        if not sheet_files:
+            sheet_files = [("Sheet1", name) for name in sorted(z.namelist())
+                           if re.match(r"xl/worksheets/sheet\d+\.xml$", name)]
+
+        output = []
+        for title, sheet_path in sheet_files:
+            root = ET.fromstring(z.read(sheet_path))
+            grid = {}
+            for cell in root.iter(f"{{{NS['m']}}}c"):
+                ref = cell.get("r")
+                if not ref:
+                    continue
+                try:
+                    col_index, row_index = _col_index(ref)
+                except (AttributeError, ValueError):
+                    continue
+                if row_index >= MAX_ROWS or col_index >= MAX_COLS:
+                    continue
+                formula = cell.find("m:f", NS)
+                value = cell.find("m:v", NS)
+                if formula is not None and formula.text:
+                    text = "=" + formula.text
+                elif cell.get("t") == "s" and value is not None:
+                    try:
+                        text = shared[int(value.text)]
+                    except (TypeError, ValueError, IndexError):
+                        text = ""
+                elif cell.get("t") == "inlineStr":
+                    text = "".join(part.text or "" for part in cell.iter(f"{{{NS['m']}}}t"))
+                elif cell.get("t") == "b" and value is not None:
+                    text = "TRUE" if value.text == "1" else "FALSE"
+                else:
+                    text = value.text if value is not None and value.text else ""
+                if text:
+                    grid[(row_index, col_index)] = text
+            rows = []
+            if grid:
+                for row_index in range(max(k[0] for k in grid) + 1):
+                    width = max([k[1] + 1 for k in grid if k[0] == row_index] or [0])
+                    rows.append([grid.get((row_index, c), "") for c in range(width)])
+            output.append([SHEET, title])
+            output.extend(rows)
+        return output
+
+
+def _read_xls(path):
+    """Read an old binary .xls workbook (needs the optional xlrd package)."""
+    try:
+        import xlrd
+    except ImportError as exc:
+        raise ValueError("Reading old .xls workbooks needs the 'xlrd' package. Install it "
+                         "(python -m pip install xlrd) or save the file as .xlsx.") from exc
+    from .books import SHEET
+    try:
+        book = xlrd.open_workbook(path, on_demand=True)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("That .xls workbook could not be read.") from exc
+    output = []
+    try:
+        for sheet in book.sheets():
+            output.append([SHEET, sheet.name])
+            for row_index in range(min(sheet.nrows, MAX_ROWS)):
+                row = [_xls_cell_text(sheet.cell(row_index, c), book.datemode)
+                       for c in range(min(sheet.ncols, MAX_COLS))]
+                while row and row[-1] == "":
+                    row.pop()
+                output.append(row)
+    finally:
+        book.release_resources()
+    return output
+
+
+def _xls_cell_text(cell, datemode):
+    import xlrd
+    if cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+        return ""
+    if cell.ctype == xlrd.XL_CELL_NUMBER:
+        value = float(cell.value)
+        return str(int(value)) if value.is_integer() else repr(value)
+    if cell.ctype == xlrd.XL_CELL_DATE:
+        try:
+            return xlrd.xldate_as_datetime(cell.value, datemode).strftime("%Y-%m-%d")
+        except Exception:  # noqa: BLE001
+            return str(cell.value)
+    if cell.ctype == xlrd.XL_CELL_BOOLEAN:
+        return "TRUE" if cell.value else "FALSE"
+    if cell.ctype == xlrd.XL_CELL_ERROR:
+        return ""
+    return str(cell.value)
+
+
+def _has_data(rows):
+    """True if the parsed rows contain at least one non-empty cell (sheet markers excluded)."""
+    from .books import SHEET
+    for row in rows:
+        if not row or (len(row) == 2 and row[0] == SHEET):
             continue
-        col, row = _col_index(ref)
-        if row >= MAX_ROWS or col >= MAX_COLS:
-            continue
-        f = c.find("m:f", NS)
-        v = c.find("m:v", NS)
-        if f is not None and f.text:
-            text = "=" + f.text
-        elif c.get("t") == "s" and v is not None:
-            text = shared[int(v.text)]
-        elif c.get("t") == "inlineStr":
-            text = "".join(t.text or "" for t in c.iter(f"{{{NS['m']}}}t"))
-        elif c.get("t") == "b" and v is not None:
-            text = "TRUE" if v.text == "1" else "FALSE"
-        else:
-            text = v.text if v is not None and v.text else ""
-        if text:
-            grid[(row, col)] = text
-    if not grid:
-        return []
-    rows = []
-    for r in range(max(k[0] for k in grid) + 1):
-        width = max([k[1] + 1 for k in grid if k[0] == r] or [0])
-        rows.append([grid.get((r, c), "") for c in range(width)])
-    return rows
+        if any(str(cell).strip() for cell in row):
+            return True
+    return False
+
+
+def validate_workbook(path):
+    """Raise ValueError with a readable reason if `path` can't be typed as a workbook."""
+    try:
+        rows = read_rows(path)
+    except ValueError:
+        raise
+    except (OSError, zipfile.BadZipFile, ET.ParseError) as exc:
+        raise ValueError("That file isn't a readable Excel workbook. If it is an old .xls, "
+                         "save it as .xlsx (or install xlrd) and upload again.") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("That file isn't a readable Excel workbook.") from exc
+    if not _has_data(rows):
+        raise ValueError("That workbook has no cell data to type. Add some rows and upload again.")
+    return True
 
 
 def uploaded_project(name):
-    rows = read_rows(os.path.join(UPLOADS, name))
+    rows = read_rows(uploaded_path(name))
+    if not _has_data(rows):
+        raise ValueError(f"{name} has no cell data to type")
     stem = re.sub(r"[^a-z0-9]+", "-", os.path.splitext(name)[0].lower()).strip("-") or "workbook"
     return {"name": f"{stem}-work", "title": os.path.splitext(name)[0], "kind": "sheet",
             "files": [(f"{stem}.xlsx", rows)], "scaffold": [], "steps": [], "language": "spreadsheet",
             "records": [name]}
 
 
-def sheets_cycle(seed=None, selected=None):
+def sheets_cycle(seed=None, selected=None, log=None):
     """Forever. With `selected` (names from list_sheet_projects): just those, in turn, with fresh
-    data each round. Otherwise: your uploaded workbooks first, then a ready-made one, and round again."""
+    data each round. Otherwise: your uploaded workbooks first, then a ready-made one, and round again.
+
+    A workbook that can't be read is skipped (and logged) instead of stalling the loop forever."""
     rng = random.Random(seed)
     valid = {p["name"] for p in list_sheet_projects()}
     chosen = [n for n in (selected or []) if n in valid]
     while chosen:
+        produced = False
         for name in chosen:
             try:
                 project = sheet_project(name, random.Random(rng.random()))
-            except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError, KeyError):
+            except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError, KeyError) as exc:
+                if log:
+                    log(f"Couldn't read {name}: {exc}")
                 continue
-            if project["files"][0][1]:
+            if project.get("files") and project["files"][0][1]:
+                produced = True
                 yield project
+        if not produced:
+            if log:
+                log("None of the chosen spreadsheet projects could be read; using the normal rotation")
+            break
     while True:
         for name in uploaded():
             try:
                 project = uploaded_project(name)
-            except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError):
+            except (OSError, zipfile.BadZipFile, ET.ParseError, ValueError) as exc:
+                if log:
+                    log(f"Couldn't read uploaded workbook {name}: {exc}")
                 continue
-            if project["files"][0][1]:
+            if project.get("files") and project["files"][0][1]:
                 yield project
         yield generate(seed=rng.random())
 

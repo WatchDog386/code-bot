@@ -39,8 +39,7 @@ last_bot_esc = 0.0
 
 
 def press_esc():
-    """Esc pressed by the bot (closes a suggestion popup / the palette) - the Esc-Esc kill
-    switch ignores it."""
+    """Esc pressed by the bot (closes a suggestion popup / the palette)."""
     global last_bot_esc
     last_bot_esc = time.time()
     pyautogui.press("esc")

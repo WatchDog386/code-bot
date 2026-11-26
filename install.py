@@ -10,8 +10,7 @@ Windows : a desktop shortcut with the Invotech 360 icon, a shortcut in your Star
 macOS   : a LaunchAgent (at login + every day at the schedule time) and a desktop launcher.
 Linux   : an autostart entry, a desktop launcher and a cron entry at the schedule time.
 
-The daily window and the 10-hour limit are enforced by Invotech 360 itself (Settings >
-Schedule in the dashboard); this only makes sure it is running.
+There is no run or daily time limit. Invotech 360 itself controls the schedule time.
 """
 
 import json
@@ -31,13 +30,15 @@ IS_MAC = sys.platform == "darwin"
 
 
 def schedule_start():
-    try:
-        with open(os.path.join(HERE, "settings.json"), encoding="utf-8") as fh:
-            value = json.load(fh).get("schedule_start", "03:00")
-        hh, mm = (int(v) for v in value.split(":"))
-        return hh, mm
-    except (OSError, ValueError, AttributeError):
-        return 3, 0
+    for path in (os.path.join(HERE, "bot_data", "settings.json"), os.path.join(HERE, "settings.json")):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                value = json.load(fh).get("schedule_start", "03:00")
+            hh, mm = (int(v) for v in value.split(":"))
+            return hh, mm
+        except (OSError, ValueError, AttributeError):
+            continue
+    return 3, 0
 
 
 # ----------------------------------------------------------------------------- Windows
@@ -157,7 +158,7 @@ def linux(uninstall):
         print("Removed the autostart entry, the desktop launcher and the cron entry.")
         return
     hh, mm = schedule_start()
-    entry = ("[Desktop Entry]\nType=Application\nName={name}\nComment=Coding agent\n"
+    entry = ("[Desktop Entry]\nType=Application\nName={name}\nComment=Task automation\n"
              f"Icon={PNG}\nPath={HERE}\nTerminal=false\n")
     os.makedirs(os.path.dirname(autostart), exist_ok=True)
     with open(autostart, "w", encoding="utf-8") as fh:

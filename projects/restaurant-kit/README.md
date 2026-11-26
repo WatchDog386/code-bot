@@ -8,4 +8,5 @@ Records: MenuCategory, MenuItem, DiningTable, CustomerOrder, OrderLine, Booking,
 npm install
 npx tsc -p .
 node dist/selftest.js
+node dist/example.js
 ```

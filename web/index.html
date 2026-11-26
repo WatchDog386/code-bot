@@ -62,8 +62,8 @@
   }
 
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
-  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 var(--sans);
+  html, body { height: 100%; min-height: 100%; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: clamp(13px, 1vw, 14px)/1.45 var(--sans);
          -webkit-font-smoothing: antialiased; overflow: hidden; }
   button, input, select, textarea { font: inherit; color: inherit; }
   svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2;
@@ -74,8 +74,8 @@
         border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; color: var(--muted); }
 
   /* ------------------------------------------------------------------ frame */
-  .app { display: flex; height: 100vh; }
-  .rail { width: 232px; flex: none; background: var(--nav); display: flex; flex-direction: column; color: var(--nav-text); }
+  .app { display: flex; width: 100%; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+  .rail { width: clamp(208px, 18vw, 232px); flex: none; background: var(--nav); display: flex; flex-direction: column; color: var(--nav-text); }
   .org { display: flex; align-items: center; gap: 10px; margin: 6px; padding: 9px 12px; border-radius: 4px;
          background: var(--org); cursor: pointer; border: 0; text-align: left; color: #fff; }
   .logo { width: 30px; height: 30px; border-radius: 6px; background: var(--green); display: grid; place-items: center; flex: none; }
@@ -103,8 +103,8 @@
   .dot.stopped { background: var(--red); }
   @keyframes ping { 70% { box-shadow: 0 0 0 6px rgba(45,160,67,0); } 100% { box-shadow: 0 0 0 0 rgba(45,160,67,0); } }
 
-  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .bar { height: 66px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 30px;
+  .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .bar { height: clamp(54px, 7vh, 66px); min-height: 52px; flex: none; display: flex; align-items: center; gap: clamp(8px, 1vw, 14px); padding: 0 clamp(14px, 2.2vw, 30px);
          background: var(--bar); border-bottom: 1px solid var(--border); }
   .bar h1 { margin: 0; font-size: 16px; font-weight: 500; color: var(--ink); white-space: nowrap; }
   .crumb { color: var(--muted); font-size: 13px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -127,7 +127,7 @@
   .me { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
   .avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--nav); color: #fff; display: grid; place-items: center; font-weight: 600; font-size: 13px; }
 
-  .page { flex: 1; min-height: 0; overflow: auto; padding: 24px 30px 30px; }
+  .page { flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: clamp(16px, 1.8vw, 24px) clamp(14px, 2.2vw, 30px) 30px; }
   .page.ide-page { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 
   /* ---------------------------------------------------------- shared kit */
@@ -206,8 +206,8 @@
   .sl b { color: var(--ink); }
 
   /* ------------------------------------------------------------- IDE */
-  .ide { flex: 1; min-height: 0; display: grid; grid-template-columns: 248px minmax(0, 1fr) 372px; grid-template-rows: minmax(0, 1fr) auto; }
-  .ide.no-explorer { grid-template-columns: 0 minmax(0, 1fr) 372px; }
+  .ide { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(190px, clamp(190px, 18vw, 248px)) minmax(0, 1fr) minmax(280px, clamp(280px, 25vw, 372px)); grid-template-rows: minmax(0, 1fr) auto; }
+  .ide.no-explorer { grid-template-columns: 0 minmax(0, 1fr) minmax(280px, clamp(280px, 25vw, 372px)); }
   .ide.no-explorer .explorer { display: none; }
   .explorer { grid-row: 1 / 3; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .pane-head { display: flex; align-items: center; gap: 6px; height: 38px; padding: 0 8px 0 14px; font-size: 11.5px; font-weight: 600; letter-spacing: .6px; color: var(--muted); text-transform: uppercase; flex: none; }
@@ -285,7 +285,7 @@
   .term-body .info { color: var(--blue); }
   .term-body .cmd { color: var(--ink); font-weight: 500; }
 
-  /* agent panel (Cascade / Composer style) */
+  /* task panel (Cascade / Composer style) */
   .agent { grid-column: 3; grid-row: 1 / 3; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .agent-head { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--border); flex: none; }
   .agent-head h2 { margin: 0; font-size: 14.5px; font-weight: 600; flex: 1; display: flex; align-items: center; gap: 8px; }
@@ -363,9 +363,9 @@
   .toast { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); background: var(--nav); color: #fff; padding: 10px 16px; border-radius: 4px; font-size: 13.5px; box-shadow: var(--shadow); z-index: 60; transition: opacity .3s; }
 
   /* ------------------------------------------------------------- narrow */
-  @media (max-width: 1280px) {
-    .ide { grid-template-columns: 220px minmax(0, 1fr) 320px; }
-    .ide.no-explorer { grid-template-columns: 0 minmax(0, 1fr) 320px; }
+  @media (max-width: 1280px) and (min-width: 1024px) {
+    .ide { grid-template-columns: minmax(190px, 220px) minmax(0, 1fr) minmax(280px, 320px); }
+    .ide.no-explorer { grid-template-columns: 0 minmax(0, 1fr) minmax(280px, 320px); }
     .search { width: 200px; }
     .cols.c3 { grid-template-columns: 1fr 1fr; }
     .cols.c3 > :first-child { grid-column: 1 / -1; }
@@ -383,18 +383,46 @@
     .page.ide-page { overflow: auto; }
     .ide, .ide.no-explorer { display: flex; flex-direction: column; flex: none; }
     .ide > * { flex: none; }
-    .explorer { height: 240px; border-right: 0; border-bottom: 1px solid var(--border); }
-    .editor { height: 62vh; flex: none; }
-    .term { height: 180px; }
-    .agent { border-left: 0; border-top: 1px solid var(--border); min-height: 520px; }
+    .explorer { height: clamp(150px, 30vh, 240px); border-right: 0; border-bottom: 1px solid var(--border); }
+    .editor { height: clamp(340px, 62vh, 620px); flex: none; }
+    .term { height: 156px; }
+    .agent { border-left: 0; border-top: 1px solid var(--border); min-height: 460px; }
+    .panel { padding: 18px; }
+    table { display: block; max-width: 100%; overflow-x: auto; }
+    th, td { white-space: nowrap; }
   }
   @media (max-width: 560px) {
+    .bar { padding: 0 10px; gap: 6px; }
     .row2, .checks { grid-template-columns: 1fr; }
     .minis { grid-template-columns: repeat(2, 1fr); }
     .kpi b { font-size: 20px; }
     .statusbar .opt { display: none; }
     .bar h1 { font-size: 15px; }
+    .bar .pill { padding: 0 7px; }
+    .bar .switch { gap: 0; }
+    .bar .switch > span:last-child { display: none; }
     .tabs { gap: 18px; overflow-x: auto; }
+    .panel { padding: 14px; }
+    .explorer { height: 160px; }
+    .editor { height: 58vh; min-height: 300px; }
+    .agent { min-height: 420px; }
+    .composer textarea { min-height: 48px; }
+    .hint { display: none; }
+  }
+  @media (max-width: 390px) {
+    .bar .pill, .bar .me { display: none; }
+    .bar h1 { font-size: 14px; }
+    .bar .search { width: 32px; }
+    .bar .icon-btn { width: 30px; }
+  }
+  @media (max-height: 680px) and (min-width: 1024px) {
+    .bar { height: 52px; }
+    .agent-head { height: 42px; }
+    .runcard { margin-top: 8px; padding: 10px; gap: 7px; }
+    .composer { margin-bottom: 8px; }
+    .composer textarea { min-height: 46px; }
+    .hint { display: none; }
+    .term { height: 150px; }
   }
 </style>
 </head>
@@ -404,7 +432,7 @@
   <aside class="rail" id="rail">
     <button class="org" data-go="agent" aria-label="Invotech 360 home">
       <div class="logo" data-i="zap"></div>
-      <div style="flex:1;min-width:0"><b>Invotech 360</b><small id="orgSub">Coding agent · localhost</small></div>
+      <div style="flex:1;min-width:0"><b>Invotech 360</b><small id="orgSub">Invotech 360 · localhost</small></div>
       <span data-i="chevD" style="opacity:.8"></span>
     </button>
     <nav class="nav" id="nav"></nav>
@@ -419,7 +447,7 @@
     <!-- ==================================================== top bar -->
     <header class="bar">
       <button class="icon-btn menu-btn" id="menuBtn" aria-label="Menu" data-i="menu"></button>
-      <h1 id="pageTitle">Agent</h1>
+      <h1 id="pageTitle">Task</h1>
       <span class="pill" id="state">idle</span>
       <span class="crumb" id="barCrumb"></span>
       <div class="spacer"></div>
@@ -430,7 +458,7 @@
       <div class="me"><div class="avatar">I3</div><span id="meName">localhost</span></div>
     </header>
 
-    <!-- ==================================================== AGENT (IDE) -->
+    <!-- ==================================================== TASK (IDE) -->
     <section class="page ide-page" data-page="agent">
       <div class="ide" id="ide">
         <aside class="explorer">
@@ -452,7 +480,7 @@
             <div class="tabtools">
               <button class="icon-btn" id="showExplorer" title="Show explorer (Ctrl+B)" data-i="sidebar"></button>
               <button class="icon-btn" id="previewBtn" title="Live preview of the bot's VS Code screen" data-i="monitor"></button>
-              <button class="icon-btn on" id="followBtn" title="Follow the agent's cursor" data-i="eye"></button>
+              <button class="icon-btn on" id="followBtn" title="Follow the typing cursor" data-i="eye"></button>
               <button class="icon-btn" id="openEditor" title="Open the real editor (VS Code)" data-i="external"></button>
             </div>
           </div>
@@ -466,15 +494,15 @@
           <div class="welcome" id="welcome">
             <div>
               <div class="logo" data-i="zap"></div>
-              <h3>Invotech 360 agent</h3>
+              <h3>Invotech 360</h3>
               <p>Writes real projects in VS Code, file by file, at a human pace. The live code appears here as it's typed.</p>
-              <button class="btn primary" id="welcomeStart"><span data-i="play"></span>Start agent</button>
+              <button class="btn primary" id="welcomeStart"><span data-i="play"></span>Start task</button>
               <div class="keys">
                 <span>Command palette</span><span><kbd>Ctrl</kbd> <kbd>K</kbd></span>
                 <span>Start / resume</span><span><kbd>Ctrl</kbd> <kbd>Enter</kbd></span>
                 <span>Stop</span><span><kbd>Ctrl</kbd> <kbd>.</kbd></span>
-                <span>Ask the agent</span><span><kbd>Ctrl</kbd> <kbd>L</kbd></span>
-                <span>Kill switch (anywhere)</span><span><kbd>Esc</kbd> <kbd>Esc</kbd></span>
+                <span>Ask Invotech 360</span><span><kbd>Ctrl</kbd> <kbd>L</kbd></span>
+                <span>Kill switch (anywhere)</span><span><kbd>Esc</kbd></span>
                 <span>Pause / resume (anywhere)</span><span><kbd>F9</kbd></span>
               </div>
             </div>
@@ -495,7 +523,7 @@
 
         <aside class="agent">
           <div class="agent-head">
-            <h2><span data-i="sparkle"></span>Agent</h2>
+            <h2><span data-i="sparkle"></span>Task</h2>
             <button class="btn sm" id="pause"><span data-i="pause"></span>Pause</button>
           </div>
           <div class="runcard" id="runcard">
@@ -506,7 +534,7 @@
           </div>
           <div class="steps" id="steps"></div>
           <div class="composer">
-            <textarea id="ask" rows="2" placeholder="Tell the agent what to do… e.g. “new project in go” or “write fleet-api at 60 wpm”"></textarea>
+            <textarea id="ask" rows="2" placeholder="Tell Invotech 360 what to do… e.g. “new project in go” or “write fleet-api at 60 wpm”"></textarea>
             <div class="ctl">
               <select id="qProject" title="Project"></select>
               <select id="qMode" title="Mode">
@@ -530,7 +558,7 @@
       </div>
       <div class="cols c3">
         <div class="panel">
-          <div class="panel-head"><h2>Current run</h2><button class="link" data-go="agent">Open agent</button></div>
+          <div class="panel-head"><h2>Current run</h2><button class="link" data-go="agent">Open task</button></div>
           <div class="minis">
             <div class="mini"><b id="s_uptime">0:00</b><span>Uptime</span></div>
             <div class="mini"><b id="s_projects">0</b><span>Projects</span></div>
@@ -567,7 +595,7 @@
           <button class="btn" id="sheetStart"><span data-i="chart"></span>Spreadsheet (WPS Office)</button>
           <button class="btn" id="genStart"><span data-i="code"></span>Programming (VS Code)</button>
           <button class="btn primary" id="bothStart"><span data-i="layers"></span>Both, nonstop</button></div>
-        <p class="muted" style="margin:0"><b>Both</b>: a code project in VS Code, then a spreadsheet in WPS Office, round and round. <b>Programming</b>: VS Code opens and the bot types the projects from the library below, one after another, file by file (every file is over 1000 lines), then builds, tests and runs each one in VS Code's terminal. <b>Spreadsheet</b>: WPS Office (or Excel) opens and the bot types your uploaded workbooks and ready-made ones - budget, sales report, inventory, payroll, class results, expense claims, project tracker - cell by cell with real formulas, and saves them.</p>
+        <p class="muted" style="margin:0"><b>Both</b>: a code project in VS Code, then a spreadsheet in WPS Office, round and round. <b>Programming</b>: VS Code opens each project, creates all its files, then writes up to 50 lines per file before moving to the next file. It cycles through every file until the project is complete. <b>Spreadsheet</b>: WPS Office (or Excel) opens and the bot types your uploaded workbooks and ready-made ones - budget, sales report, inventory, payroll, class results, expense claims, project tracker and customer register - cell by cell with formulas, formatted headers and summaries.</p>
         <div class="chips" id="genDomains" style="gap:6px"></div>
       </div>
       <div class="panel" style="margin-bottom:20px">
@@ -579,12 +607,19 @@
       </div>
       <div class="panel" style="margin-bottom:20px">
         <div class="panel-head"><h2>Excel work</h2>
-          <label class="btn primary" style="cursor:pointer"><span data-i="external"></span>Upload Excel / CSV<input type="file" id="sheetUpload" accept=".xlsx,.csv" multiple hidden></label></div>
+          <label class="btn primary" style="cursor:pointer"><span data-i="external"></span>Upload Excel / CSV<input type="file" id="sheetUpload" accept=".xlsx,.xlsm,.xls,.csv" multiple hidden></label></div>
         <p class="muted" style="margin:0">Upload your own workbooks: the bot types them into WPS Office cell by cell (values and formulas), then the ready-made ones. Finished workbooks can be downloaded here (they're kept in memory, not saved on your PC).</p>
         <div class="cols c2" style="margin-top:0">
           <div><div class="muted" style="margin-bottom:6px"><b>Your uploads</b></div><div id="upList"></div></div>
           <div><div class="muted" style="margin-bottom:6px"><b>Finished - download</b></div><div id="resList"></div></div>
         </div>
+      </div>
+      <div class="panel" style="margin-bottom:20px">
+        <div class="panel-head"><h2>Upload a coding project</h2>
+          <label class="btn primary" style="cursor:pointer"><span data-i="external"></span>Upload project ZIP<input type="file" id="projectUpload" accept=".zip,application/zip" multiple hidden></label></div>
+        <p class="muted" style="margin:0">Choose a ZIP of your project (up to 50 MB). The bot imports supported plain-ASCII text files with their folder structure intact, then you can preview or write it from the Projects library. Git folders, dependencies, build output, binary files, non-ASCII files, and files over 400 KB are skipped.</p>
+        <div id="projectUploadList" style="margin-top:10px"></div>
+        <div id="projectUploadStatus" class="muted" role="status" aria-live="polite" style="margin-top:8px"></div>
       </div>
       <div class="panel">
         <div class="panel-head"><h2>Projects library</h2><span class="muted">Ticked projects are written in rotation — none ticked = all of them</span></div>
@@ -601,7 +636,7 @@
     <section class="page hidden" data-page="activity">
       <div class="cols c2" style="margin-top:0">
         <div class="panel">
-          <div class="panel-head"><h2>Agent timeline</h2><button class="link" id="clearTimeline">Clear</button></div>
+          <div class="panel-head"><h2>Task timeline</h2><button class="link" id="clearTimeline">Clear</button></div>
           <div class="timeline" id="timeline"></div>
         </div>
         <div class="panel">
@@ -649,7 +684,7 @@
               <div><label class="f" style="margin-top:0">Mouse pause max (s)</label><input type="number" id="mouse_max" min="0.2" step="0.5"></div>
             </div>
             <div class="row2">
-              <div><label class="f">Auto-stop after (min, 0 = never)</label><input type="number" id="minutes" min="0" step="5"></div>
+              <div><label class="f">Run time limit</label><input type="text" id="minutes" value="No limit" disabled></div>
               <div><label class="f">Take the keyboard back after I'm idle (s)</label><input type="number" id="resume_after" min="0" step="1"></div>
             </div>
             <div class="row2">
@@ -659,7 +694,7 @@
             <div class="checks">
               <label><input type="checkbox" id="scroll"> Random scrolling</label>
               <label><input type="checkbox" id="detect_user"> Let go of the mouse when I use it</label>
-              <label><input type="checkbox" id="background_typing"> Keep writing code while I work (VS Code)</label>
+              <label><input type="checkbox" id="background_typing"> Keep working on files and spreadsheets while I work</label>
               <label><input type="checkbox" id="keep_focus"> Keep editor focused</label>
               <label><input type="checkbox" id="auto_open_editor"> Auto-open editor</label>
             </div>
@@ -707,9 +742,9 @@
             <div class="checks" style="grid-template-columns:1fr;margin-top:0"><label><input type="checkbox" id="schedule_enabled"> Start by itself every day</label></div>
             <div class="row2">
               <div><label class="f">Start at (this computer's time)</label><input type="time" id="schedule_start" style="width:100%;height:38px;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:0 10px"></div>
-              <div><label class="f">Hours a day (the limit, 0 = none)</label><input type="number" id="daily_hours" min="0" max="24" step="0.5"></div>
+              <div><label class="f">Daily time limit</label><input type="text" id="daily_hours" value="No limit" disabled></div>
             </div>
-            <p class="muted" style="margin:14px 0 0">It starts at this time and stops when the hours are used up or the day's window ends. The limit also counts runs you start yourself. If you press Stop, it stays off until the next day. To have it start when you sign in and at this time even if the app is closed, run <code>python install.py</code> once.</p>
+            <p class="muted" style="margin:14px 0 0">It starts at this time and keeps running with no time limit. If you press Stop, it stays off until the next day. To have it start when you sign in and at this time even if the app is closed, run <code>python install.py</code> once.</p>
           </div>
         </div>
         <div class="panel">
@@ -818,7 +853,7 @@ const paintIcons = (root = document) => root.querySelectorAll("[data-i]").forEac
 /* ================================================================ helpers */
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-let languages = [], projects = [], monitors = [], projectMeta = {}, generator = { languages: [], domains: {} };
+let languages = [], projects = [], monitors = [], projectMeta = {}, uploadedProjectNames = new Set(), generator = { languages: [], domains: {} };
 let lastStatus = null;
 
 function fmt(sec) {
@@ -916,12 +951,12 @@ function htmlLines(html) {
 
 /* ================================================================ navigation */
 const NAV = [
-  { items: [{ id: "agent", label: "Agent", icon: "sparkle" }, { id: "overview", label: "Overview", icon: "home" }] },
+  { items: [{ id: "agent", label: "Task", icon: "sparkle" }, { id: "overview", label: "Overview", icon: "home" }] },
   { title: "Workspace", items: [{ id: "projects", label: "Projects", icon: "folder" }, { id: "activity", label: "Activity", icon: "activity", badge: true }] },
   { title: "Configure", items: [{ id: "behavior", label: "Settings", icon: "sliders" }] },
 ];
 const BOTTOM = [{ id: "palette", label: "Command palette", icon: "search" }, { id: "shortcuts", label: "Shortcuts", icon: "keyboard" }];
-const TITLES = { agent: "Agent", overview: "Overview", projects: "Projects", activity: "Activity", behavior: "Settings" };
+const TITLES = { agent: "Task", overview: "Overview", projects: "Projects", activity: "Activity", behavior: "Settings" };
 let page = store.get("page", "agent");
 
 function navItem(i) {
@@ -986,7 +1021,6 @@ function readForm() {
     typo_rate: +$("typo_rate").value / 100,
     mouse_min: +$("mouse_min").value,
     mouse_max: +$("mouse_max").value,
-    minutes: +$("minutes").value,
     clear_after_lines: +$("clear_after_lines").value,
     scroll: $("scroll").checked,
     breaks: $("breaks").checked,
@@ -1001,7 +1035,6 @@ function readForm() {
     mouse_resume: +$("mouse_resume").value,
     schedule_enabled: $("schedule_enabled").checked,
     schedule_start: $("schedule_start").value || "03:00",
-    daily_hours: +$("daily_hours").value,
     serve_seconds: +$("serve_seconds").value,
     maximize: $("maximize").checked,
     resume_after: +$("resume_after").value,
@@ -1026,13 +1059,13 @@ function fillForm(c) {
   setMode(c.mode);
   $("wpm").value = c.wpm; $("wpmv").textContent = c.wpm;
   $("typo_rate").value = (c.typo_rate * 100).toFixed(1); $("typov").textContent = (c.typo_rate * 100).toFixed(1);
-  for (const k of ["mouse_min", "mouse_max", "minutes", "clear_after_lines", "start_delay", "custom_file",
+  for (const k of ["mouse_min", "mouse_max", "clear_after_lines", "start_delay", "custom_file",
                    "editor", "source", "workspace_dir"]) $(k).value = c[k];
   for (const k of ["scroll", "breaks", "auto_open_editor", "keep_focus", "review_moves", "detect_user",
                    "keep_finished", "maximize", "background_typing", "terminal_after_project"]) $(k).checked = !!c[k];
   $("terminal_timeout").value = c.terminal_timeout;
   $("mouse_resume").value = c.mouse_resume; $("serve_seconds").value = c.serve_seconds;
-  $("schedule_enabled").checked = !!c.schedule_enabled; $("schedule_start").value = c.schedule_start; $("daily_hours").value = c.daily_hours;
+  $("schedule_enabled").checked = !!c.schedule_enabled; $("schedule_start").value = c.schedule_start;
   $("resume_after").value = c.resume_after;
   $("think").value = c.think; $("thinkv").textContent = (+c.think).toFixed(1);
   $("monitor").innerHTML = '<option value="-1">Auto (a side screen)</option>' +
@@ -1062,6 +1095,15 @@ async function loadSheets() {
       || '<div class="empty">No finished workbooks yet</div>';
   } catch {}
 }
+function renderProjectUploads(items) {
+  uploadedProjectNames = new Set(items.map((p) => p.name));
+  $("projectUploadList").innerHTML = items.map((p) => `<div class="prow"><span>${ic("folder")} ${esc(p.name)} <span class="muted">${p.files} text files · from ${esc(p.archive)}</span></span><button class="link" data-remove-upload="${esc(p.name)}">Remove</button></div>`).join("")
+    || '<div class="empty">No uploaded coding projects yet</div>';
+  renderProjTable();
+}
+async function loadProjectUploads() {
+  try { const r = await api("/api/project-uploads"); renderProjectUploads(r.uploads || []); } catch {}
+}
 $("upList").addEventListener("click", async (e) => { const b = e.target.closest("[data-del]"); if (b) { await api("/api/sheets/delete", { name: b.dataset.del }); loadSheets(); } });
 $("sheetUpload").onchange = async () => {
   for (const f of $("sheetUpload").files) {
@@ -1070,7 +1112,39 @@ $("sheetUpload").onchange = async () => {
   }
   $("sheetUpload").value = ""; loadSheets();
 };
-setInterval(() => { if (page === "projects") loadSheets(); }, 8000);
+$("projectUpload").onchange = async () => {
+  for (const f of $("projectUpload").files) {
+    $("projectUploadStatus").textContent = `Uploading ${f.name}…`;
+    try {
+      const response = await fetch("/api/projects/upload?name=" + encodeURIComponent(f.name), { method: "POST", body: f });
+      let r;
+      try { r = await response.json(); }
+      catch { throw new Error(`The local server returned an unreadable response (HTTP ${response.status}).`); }
+      if (!response.ok || !r.ok) {
+        const message = r.message || r.error || `The local server rejected ${f.name} (HTTP ${response.status}).`;
+        $("projectUploadStatus").textContent = message; toast(message); continue;
+      }
+      const name = r.project?.name;
+      try {
+        await refreshProjectLibrary(name ? [...selectedProjects(), name] : selectedProjects());
+        if (name) browse(name);
+        $("projectUploadStatus").textContent = r.message || `Imported ${f.name}`;
+        toast(r.message || `Imported ${f.name}`);
+      } catch {
+        const message = `Imported ${name || f.name}, but couldn't refresh the project list. Reload the Projects page.`;
+        $("projectUploadStatus").textContent = message; toast(message);
+      }
+    } catch (error) {
+      const detail = error?.message === "Failed to fetch"
+        ? "The local bot server could not be reached. Keep the bot app running and retry."
+        : (error?.message || "Unknown upload error");
+      const message = `Couldn't upload ${f.name}: ${detail}`;
+      $("projectUploadStatus").textContent = message; toast(message);
+    }
+  }
+  $("projectUpload").value = "";
+};
+setInterval(() => { if (page === "projects") { loadSheets(); loadProjectUploads(); } }, 8000);
 $("sheetStart").onclick = () => { sheetSel = []; renderSheetTable(); $("source").value = "spreadsheets"; toggleBoxes(); syncQuickProject(); saveSettings().then(() => { go("agent"); doStart(); }); };
 $("genStart").onclick = () => { $("source").value = "projects"; setSelectedProjects([]); toggleBoxes(); syncQuickProject(); saveSettings().then(() => { go("agent"); doStart(); }); };
 $("editor").addEventListener("change", toggleBoxes);
@@ -1091,7 +1165,7 @@ function renderSheetTable() {
 }
 $("sheetTable").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-sheet]"); if (!b) return;
-  if (lastStatus?.running) { await api("/api/stop", {}); await new Promise((r) => setTimeout(r, 1500)); }
+  if (!(await stopTaskForSwitch())) return;
   sheetSel = [b.dataset.sheet]; renderSheetTable();
   $("source").value = "spreadsheets"; toggleBoxes(); syncQuickProject();
   await saveSettings(); go("agent"); doStart();
@@ -1117,7 +1191,8 @@ function renderProjTable() {
       <td><div class="lang-dots">${uniq.map((l) => `<span class="pill" style="background:${l[1]}22;color:${l[1]}">${esc(l[0])}</span>`).join("")}</div></td>
       <td style="text-align:right;white-space:nowrap">
         <button class="btn sm" data-preview="${esc(p)}">${ic("eye")}Preview</button>
-        <button class="btn sm primary" data-write="${esc(p)}">${ic("play")}Write</button></td></tr>`;
+        <button class="btn sm primary" data-write="${esc(p)}">${ic("play")}Write</button>
+        ${uploadedProjectNames.has(p) ? `<button class="btn sm" data-remove-upload="${esc(p)}">Remove</button>` : ""}</td></tr>`;
   }).join("") || `<tr><td colspan="6" class="empty">No folders in projects/</td></tr>`;
 }
 $("projTable").addEventListener("change", (e) => {
@@ -1125,15 +1200,45 @@ $("projTable").addEventListener("change", (e) => {
   const box = document.querySelector(`#projects input[value="${CSS.escape(p)}"]`); if (box) box.checked = e.target.checked;
   syncQuickProject(); saveSettings();
 });
-$("projTable").addEventListener("click", (e) => {
+$("projTable").addEventListener("click", async (e) => {
   const pv = e.target.closest("[data-preview]"), wr = e.target.closest("[data-write]");
-  if (pv) { browse(pv.dataset.preview); go("agent"); }
-  if (wr) { $("source").value = "projects"; toggleBoxes(); setSelectedProjects([wr.dataset.write]); go("agent"); doStart(); }
+  if (pv) {
+    const name = pv.dataset.preview;
+    browse(name); go("agent");
+    const meta = projectMeta[name] || await api("/api/project?name=" + encodeURIComponent(name));
+    if (meta.files?.length) await openFile(name, meta.files[0].path);
+    return;
+  }
+  if (wr) {
+    $("source").value = "projects"; toggleBoxes(); setSelectedProjects([wr.dataset.write]);
+    browse(wr.dataset.write); go("agent");
+    if (await stopTaskForSwitch()) await doStart();
+  }
+  const rm = e.target.closest("[data-remove-upload]");
+  if (rm) removeUploadedProject(rm.dataset.removeUpload);
 });
 async function loadProjectMeta() {
   await Promise.all(projects.map(async (p) => { try { projectMeta[p] = await api("/api/project?name=" + encodeURIComponent(p)); } catch {} }));
   renderProjTable(); renderTree();
 }
+async function refreshProjectLibrary(selection = selectedProjects()) {
+  const s = await api("/api/settings");
+  projects = s.projects || [];
+  renderProjectUploads(s.uploaded_projects || []);
+  $("browseProject").innerHTML = projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+  $("projects").innerHTML = projects.map((p) => `<input type="checkbox" value="${esc(p)}" ${selection.includes(p) ? "checked" : ""}>`).join("");
+  setSelectedProjects(selection.filter((p) => projects.includes(p)));
+  await loadProjectMeta();
+}
+async function removeUploadedProject(name) {
+  const r = await api("/api/projects/delete", { name });
+  toast(r.message);
+  if (r.ok) await refreshProjectLibrary(selectedProjects().filter((p) => p !== name));
+}
+$("projectUploadList").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-remove-upload]");
+  if (b) removeUploadedProject(b.dataset.removeUpload);
+});
 
 /* ================================================================ explorer + editor */
 let live = { project: "", files: [], done: [], file: "", text: "", activity: "", line: 0, lines_total: 0 };
@@ -1238,7 +1343,7 @@ function renderTabs() {
     ? `<button class="etab${t.id === activeTab ? " on" : ""}" data-tab="preview" title="Live view of the bot's screen">${ic("monitor")}<span>Preview</span><span class="x" data-close="preview">${ic("x")}</span></button>`
     : `<button class="etab${t.id === activeTab ? " on" : ""}" data-tab="${esc(t.id)}" title="${esc(t.project + "/" + t.path)}">
       ${fileIcon(t.path)}<span>${esc(t.path.split("/").pop())}</span>
-      ${t.id === "live" ? '<i class="live" title="Agent is writing this file"></i>' : `<span class="x" data-close="${esc(t.id)}">${ic("x")}</span>`}</button>`).join("");
+      ${t.id === "live" ? '<i class="live" title="Task is writing this file"></i>' : `<span class="x" data-close="${esc(t.id)}">${ic("x")}</span>`}</button>`).join("");
 }
 $("etabs").onclick = (e) => {
   const c = e.target.closest("[data-close]");
@@ -1316,9 +1421,9 @@ function renderEditor(force) {
 // scrolling up while following pauses follow (like a terminal)
 $("code").addEventListener("wheel", (e) => { if (e.deltaY < 0 && follow && activeTab === "live") { follow = false; $("followBtn").classList.remove("on"); } }, { passive: true });
 
-/* ================================================================ agent timeline */
+/* ================================================================ task timeline */
 let events = [], maxEventId = 0, seenEvents = store.get("seen", 0), chat = [];
-const KIND_ICON = { plan: "layers", create: "file", verify: "check", warn: "alert", think: "cpu", start: "play", stop: "stop",
+const KIND_ICON = { plan: "layers", create: "file", write: "file", verify: "check", warn: "alert", think: "cpu", start: "play", stop: "stop",
                     pause: "pause", resume: "play", you: "user", break: "coffee", done: "sparkle", term: "terminal" };
 function stepHtml(e) {
   return `<div class="step k-${e.kind}"><div class="si">${ic(KIND_ICON[e.kind] || "zap")}</div><div class="sb">
@@ -1328,7 +1433,8 @@ function nowLine() {
   const st = lastStatus; if (!st || !st.running) return "";
   const s = st.stats; let txt = "", spin = true;
   if (st.state === "starting") txt = "Starting up…";
-  else if (st.state === "you" && live.background) txt = `You're working · still writing ${live.file || "code"} in the background` + (live.file ? ` (line ${live.line}/${live.lines_total})` : "") + (s.resume_in ? ` · takes the keyboard back after ${s.resume_in}s idle` : "");
+  else if (st.state === "stopping") { txt = "Stopping…"; spin = false; }
+  else if (st.state === "you" && live.background) txt = `You're working · still working on ${live.file || "the project"} in the background` + (live.file && live.lines_total ? ` (line ${live.line}/${live.lines_total})` : "") + (s.resume_in ? ` · takes the keyboard back after ${s.resume_in}s idle` : "");
   else if (st.state === "you") { txt = s.resume_in ? `You have control · continues after ${s.resume_in}s idle` : "You have control · press Resume"; spin = false; }
   else if (live.activity === "terminal") txt = "Working in the terminal…";
   else if (st.state === "paused") { txt = "Paused"; spin = false; }
@@ -1352,7 +1458,7 @@ function renderSteps() {
   const box = $("steps"); const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
   box.innerHTML = (out.join("") || `<div class="reply"><div class="si">${ic("sparkle")}</div><div>Hi! I write real projects in your editor, file by file, like a person would.\nPick a project below and press send, or type <code>help</code>.</div></div>`) + nowLine();
   if (atBottom) box.scrollTop = box.scrollHeight;
-  $("timeline").innerHTML = events.slice().reverse().map(stepHtml).join("") || '<div class="empty">No activity yet. Start the agent to see each step here.</div>';
+  $("timeline").innerHTML = events.slice().reverse().map(stepHtml).join("") || '<div class="empty">No activity yet. Start a task to see each step here.</div>';
   $("recent").innerHTML = events.filter((e) => e.kind !== "think").slice(-6).reverse().map(stepHtml).join("") || '<div class="empty">Nothing yet</div>';
 }
 function updateBell() {
@@ -1378,7 +1484,7 @@ const HELP = `Here's what I understand:
 <code>typing only</code> · <code>mouse only</code> · <code>mouse and typing</code>
 <code>snippets python go</code> — short snippets instead of projects
 <code>all projects</code> · <code>open editor</code> · <code>preview</code> · <code>status</code>
-Move the mouse any time: I let go of it and keep typing. If you type or click into another window, I keep writing the file in the background.`;
+Move the mouse any time: I let go of it and keep working. If you type or click into another window, I keep writing code or finish the spreadsheet file on disk in the background.`;
 async function runCommand(raw) {
   const text = raw.trim(); if (!text) return;
   say(text); renderSteps();
@@ -1461,9 +1567,29 @@ $("qMode").onchange = () => { setMode($("qMode").value); saveSettings(); };
 /* ================================================================ actions */
 async function doStart() {
   if (lastStatus?.running) { if (!["running", "starting"].includes(lastStatus.state)) { await api("/api/resume", {}); poll(); } return { ok: true }; }
-  const r = await api("/api/start", readForm()); render(r.status); toast(r.ok ? "Agent started" : r.message); return r;
+  const r = await api("/api/start", readForm()); render(r.status); toast(r.ok ? "Task started" : r.message); return r;
 }
-async function doStop() { const r = await api("/api/stop", {}); render(r.status); toast("Agent stopped"); }
+async function stopTaskForSwitch() {
+  let status = await api("/api/status");
+  render(status);
+  if (!status.running) return true;
+  status = (await api("/api/stop", {})).status;
+  render(status);
+  for (let i = 0; i < 100; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    status = await api("/api/status");
+    render(status);
+    if (!status.running) return true;
+  }
+  toast("The current task is still stopping. Try again in a moment.");
+  return false;
+}
+async function doStop() {
+  if (!lastStatus?.running || lastStatus.state === "stopping") return;
+  $("stop").disabled = true; $("stop").innerHTML = ic("stop") + "Stopping…";
+  const r = await api("/api/stop", {}); render(r.status);
+  toast(r.status?.running ? "Stopping now" : "Task stopped");
+}
 async function doPauseToggle() {
   if (!lastStatus?.running) return;
   const resume = ["paused", "you", "break"].includes(lastStatus.state);
@@ -1505,14 +1631,15 @@ function renderTerm() {
     const s = st.stats;
     const rows = [["state", st.state], ["editor", st.editor || "—"], ["screen", st.monitor || "—"], ["uptime", fmt(s.uptime)],
       ["characters", s.chars.toLocaleString()], ["lines", s.lines.toLocaleString()], ["files", `${s.files} (${s.verified} verified, ${s.mismatched} differ)`],
-      ["projects", s.projects], ["commands run", s.commands || 0], ["typos fixed", s.typos], ["mouse moves", s.mouse_moves], ["scrolls", s.scrolls], ["breaks", s.breaks], ["takeovers", s.takeovers]];
+      ["projects", s.projects], ["commands run", s.commands || 0], ["static files reviewed", s.reviewed || 0],
+      ["review issues", s.review_issues || 0], ["typos fixed", s.typos], ["mouse moves", s.mouse_moves], ["scrolls", s.scrolls], ["breaks", s.breaks], ["takeovers", s.takeovers]];
     body.innerHTML = rows.map(([k, v]) => `<span class="ts">${k.padEnd(13)}</span>${esc(v)}`).join("\n");
   }
   if (atBottom) body.scrollTop = body.scrollHeight;
 }
 
 /* ================================================================ render status */
-const STATE_LABEL = { you: "You have control", running: "Running", paused: "Paused", break: "On a break", starting: "Starting", stopped: "Stopped", idle: "Idle" };
+const STATE_LABEL = { you: "You have control", running: "Running", paused: "Paused", break: "On a break", starting: "Starting", stopping: "Stopping", stopped: "Stopped", idle: "Idle" };
 function render(st) {
   if (!st) return;
   lastStatus = st;
@@ -1524,9 +1651,12 @@ function render(st) {
   $("railState").textContent = label; $("sbStateText").textContent = label;
   $("statusbar").className = "statusbar " + state;
   const paused = ["paused", "you", "break"].includes(state);
-  for (const b of [$("pause"), $("pause2")]) { b.disabled = !st.running || state === "starting"; b.innerHTML = ic(paused ? "play" : "pause") + (paused ? "Resume" : "Pause"); }
-  $("start").disabled = st.running; $("stop").disabled = !st.running;
-  $("send").classList.toggle("stop", st.running); $("send").innerHTML = ic(st.running ? "stop" : "send"); $("send").title = st.running ? "Stop agent" : "Send (Enter)";
+  for (const b of [$("pause"), $("pause2")]) { b.disabled = !st.running || ["starting", "stopping"].includes(state); b.innerHTML = ic(paused ? "play" : "pause") + (paused ? "Resume" : "Pause"); }
+  $("start").disabled = st.running && !paused;
+  $("start").innerHTML = ic("play") + (paused ? "Resume" : state === "starting" ? "Starting…" : "Start");
+  $("stop").disabled = !st.running || state === "stopping";
+  $("stop").innerHTML = ic("stop") + (state === "stopping" ? "Stopping…" : "Stop");
+  $("send").classList.toggle("stop", st.running); $("send").innerHTML = ic(st.running ? "stop" : "send"); $("send").title = st.running ? "Stop task" : "Send (Enter)";
   if (state === "you") $("info").textContent = s.resume_in ? `Waiting for you — continues in ${s.resume_in}s of idle` : "Waiting for you — press Resume";
   else $("info").textContent = [st.editor, st.monitor].filter(Boolean).join(" · ");
 
@@ -1560,7 +1690,8 @@ function render(st) {
   $("sbMonText").textContent = st.monitor || "screen";
   const probs = s.mismatched; $("sbProbText").textContent = probs; $("probCount").textContent = probs;
 
-  const rows = [["Editor", st.editor || "—"], ["Screen", st.monitor || "—"], ["Projects written", s.projects], ["Mouse moves", s.mouse_moves.toLocaleString()],
+  const rows = [["Editor", st.editor || "—"], ["Screen", st.monitor || "—"], ["Projects written", s.projects],
+    ["Static files reviewed", s.reviewed || 0], ["Review issues", s.review_issues || 0], ["Mouse moves", s.mouse_moves.toLocaleString()],
                 ["Commands run", s.commands || 0], ["Scrolls", s.scrolls], ["Breaks taken", s.breaks], ["Times you took over", s.takeovers]];
   $("sessionRows").innerHTML = rows.map(([k, v]) => `<div class="prow"><span>${k}</span><b>${esc(v)}</b></div>`).join("");
 
@@ -1610,17 +1741,17 @@ let pItems = [], pIndex = 0;
 function commands() {
   const st = lastStatus, run = st?.running, paused = ["paused", "you", "break"].includes(st?.state);
   const list = [
-    !run && { icon: "play", label: "Agent: Start", hint: "Ctrl+Enter", fn: doStart },
-    run && { icon: paused ? "play" : "pause", label: paused ? "Agent: Resume" : "Agent: Pause", hint: "F9", fn: doPauseToggle },
-    run && { icon: "stop", label: "Agent: Stop", hint: "Ctrl+.", fn: doStop },
+    !run && { icon: "play", label: "Task: Start", hint: "Ctrl+Enter", fn: doStart },
+    run && { icon: paused ? "play" : "pause", label: paused ? "Task: Resume" : "Task: Pause", hint: "F9", fn: doPauseToggle },
+    run && { icon: "stop", label: "Task: Stop", hint: "Ctrl+.", fn: doStop },
     { icon: "external", label: "Open the real editor (VS Code)", fn: openEd },
-    { icon: "msg", label: "Ask the agent…", hint: "Ctrl+L", fn: () => { go("agent"); $("ask").focus(); } },
+    { icon: "msg", label: "Ask Invotech 360…", hint: "Ctrl+L", fn: () => { go("agent"); $("ask").focus(); } },
     ...Object.entries(TITLES).map(([id, t]) => ({ icon: "chevR", label: "Go to " + t, fn: () => go(id) })),
     { icon: "monitor", label: "Show live preview of VS Code", fn: () => { go("agent"); openPreview(); } },
     { icon: "moon", label: "Toggle dark mode", fn: toggleDark },
     { icon: "terminal", label: "Toggle bottom panel", hint: "Ctrl+J", fn: toggleTerm },
     { icon: "sidebar", label: "Toggle explorer", hint: "Ctrl+B", fn: () => setExplorer($("ide").classList.contains("no-explorer")) },
-    { icon: "eye", label: (follow ? "Stop following" : "Follow") + " the agent's cursor", fn: () => $("followBtn").click() },
+    { icon: "eye", label: (follow ? "Stop following" : "Follow") + " the cursor", fn: () => $("followBtn").click() },
     ...[30, 45, 60, 80].map((w) => ({ icon: "keyboard", label: `Typing speed: ${w} WPM`, fn: () => { $("wpm").value = w; $("wpm").oninput(); saveSettings(); toast(`Speed ${w} WPM (next start)`); } })),
     ...projects.map((p) => ({ icon: "folder", label: "Write project: " + p, fn: () => { $("source").value = "projects"; toggleBoxes(); setSelectedProjects([p]); saveSettings().then(doStart); } })),
   ].filter(Boolean);
@@ -1689,6 +1820,8 @@ go(page);
 (async () => {
   const s = await api("/api/settings");
   languages = s.languages; projects = s.projects; monitors = s.monitors || [];
+  uploadedProjectNames = new Set((s.uploaded_projects || []).map((p) => p.name));
+  renderProjectUploads(s.uploaded_projects || []);
   sheetProjects = s.sheet_projects || []; sheetSel = (s.config && s.config.sheet_projects) || []; renderSheetTable();
   generator = s.generator || generator;
   $("genDomains").innerHTML = Object.entries(generator.domains).map(([k, title]) => `<span class="pill" title="${esc(k)}">${esc(title)}</span>`).join("");
@@ -1696,7 +1829,7 @@ go(page);
   fillForm(s.config);
   renderTree(); renderTabs(); renderEditor(true); renderSteps();
   poll(); setInterval(poll, 1000);
-  loadProjectMeta();
+  loadProjectMeta(); loadProjectUploads();
 })();
 </script>
 </body>

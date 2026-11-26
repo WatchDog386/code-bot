@@ -7,4 +7,5 @@ Records: Supplier, Product, Bin, StockMovement, PurchaseOrder, StockCount, Docum
 ```bash
 go test ./...
 go run ./cmd/server     # http://127.0.0.1:8080/health
+go run ./examples/sample
 ```
