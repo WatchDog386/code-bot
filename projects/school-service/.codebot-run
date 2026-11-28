@@ -1,0 +1,5 @@
+# typed into VS Code's terminal by the bot after the project is written
+python -m compileall -q .
+python -m unittest discover -s tests -t .   # wait 20
+serve: python -m school_service.api
+open: http://127.0.0.1:8000/summary

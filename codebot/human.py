@@ -35,6 +35,17 @@ def bounds():
     return (0, 0, w, h)
 
 
+last_bot_esc = 0.0
+
+
+def press_esc():
+    """Esc pressed by the bot (closes a suggestion popup / the palette)."""
+    global last_bot_esc
+    last_bot_esc = time.time()
+    pyautogui.press("esc")
+    last_bot_esc = time.time()
+
+
 def _clamp(x, y):
     bx, by, bw, bh = bounds()
     return (min(max(bx + SAFE_MARGIN, x), bx + bw - SAFE_MARGIN),

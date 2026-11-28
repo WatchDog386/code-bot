@@ -3,3 +3,8 @@ __pycache__/
 settings.json
 .venv/
 venv/
+logs/
+usage.json
+sheets/
+bot_data/*
+!bot_data/README.md

@@ -1,49 +1,83 @@
 #!/usr/bin/env python3
 """
-code-bot control panel, served at http://localhost:8765
+Invotech 360 control panel, served at http://localhost:8765
 
-    python app.py                  # opens VS Code on your chosen screen + the dashboard
+    python app.py                  # opens ONLY the dashboard: pick a project, press Start
     python app.py --autostart      # also starts the bot immediately
-    python app.py --port 9000 --no-browser --no-editor
+    python app.py --open-editor    # also opens VS Code right away
+    python app.py --port 9000 --no-browser
 
-Kill switch (anywhere): press Esc twice quickly. F9 = pause/resume.
-Emergency stop: shove the mouse into a corner of the screen.
+Kill switch (anywhere): press Esc once. F9 = pause/resume.
+It never stops on its own: only Esc or Stop end a run.
 """
 
 import argparse
 import json
 import os
+import shutil
 import sys
+import tempfile
 import threading
 import webbrowser
+from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
     from codebot.engine import Bot, Config, monitors_info
-    from codebot.projects import list_projects
+    from codebot.projects import (PROJECT_UPLOAD_MAX_BYTES, delete_uploaded_project, import_project_archive,
+                                 list_projects, project_files, project_scaffold, uploaded_projects)
+    from codebot.sheets import list_sheet_projects
     from codebot.snippets import LANGUAGES
+    from codebot.gen import LANGUAGES as GEN_LANGUAGES
+    from codebot.gen.schema import DOMAINS as GEN_DOMAINS
+    from codebot.storage import SETTINGS_FILE, USAGE_FILE, ensure_data_dir
 except ImportError as exc:
     print(f"Missing dependency ({exc}). Run:\n    python -m pip install -r requirements.txt")
     sys.exit(1)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SETTINGS = os.path.join(HERE, "settings.json")
+ensure_data_dir()
+SETTINGS = SETTINGS_FILE
+LEGACY_SETTINGS = os.path.join(HERE, "settings.json")
+LEGACY_USAGE = os.path.join(HERE, "usage.json")
+if not os.path.exists(USAGE_FILE) and os.path.isfile(LEGACY_USAGE):
+    try:
+        shutil.copy2(LEGACY_USAGE, USAGE_FILE)
+    except OSError:
+        pass
 INDEX = os.path.join(HERE, "web", "index.html")
+FAVICON = os.path.join(HERE, "web", "favicon.png")
 
 bot = Bot()
 
 
 def load_settings():
-    try:
-        with open(SETTINGS, encoding="utf-8") as fh:
-            return Config.from_dict(json.load(fh))
-    except (OSError, ValueError):
-        return Config()
+    for path in (SETTINGS, LEGACY_SETTINGS):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return Config.from_dict(json.load(fh))
+        except (OSError, ValueError):
+            continue
+    return Config()
+
+
+from codebot.schedule import Scheduler  # noqa: E402
+
+scheduler = Scheduler(bot, lambda: load_settings(), USAGE_FILE)
+
+
+def start_by_hand(body):
+    ok, msg = scheduler.allow_start()
+    if not ok:
+        bot.log(msg)
+        return False, msg
+    return bot.start(body)
 
 
 def save_settings(cfg_dict):
     from dataclasses import asdict
     try:
+        ensure_data_dir()
         with open(SETTINGS, "w", encoding="utf-8") as fh:
             json.dump(asdict(Config.from_dict(cfg_dict)), fh, indent=2)
     except OSError:
@@ -72,16 +106,113 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return {}
 
+    def _read_upload(self, length):
+        """Read exactly one bounded upload body, tolerating short socket reads."""
+        chunks = []
+        remaining = length
+        while remaining:
+            chunk = self.rfile.read(min(remaining, 1 << 20))
+            if not chunk:
+                raise OSError("the upload ended before all bytes arrived")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
     def do_GET(self):
+        url = urlparse(self.path)
+        q = {k: v[0] for k, v in parse_qs(url.query).items()}
+        if url.path == "/api/live":
+            try:
+                since = int(q.get("since", 0))
+            except ValueError:
+                since = 0
+            return self._send(200, bot.live_status(since))
+        if url.path == "/api/screen.jpg":
+            data = bot.screenshot_jpeg()
+            if not data:
+                return self._send(503, {"error": "screen capture not available"})
+            return self._send(200, data, "image/jpeg")
+        if url.path == "/api/sheets":
+            from codebot.sheets import uploaded
+            return self._send(200, {"uploads": uploaded(), "projects": list_sheet_projects(), "results": [
+                {"i": i, "name": r["name"], "project": r["project"], "t": r["t"], "size": len(r["data"])}
+                for i, r in enumerate(bot.results)]})
+        if url.path == "/api/project-uploads":
+            return self._send(200, {"uploads": uploaded_projects()})
+        if url.path.startswith("/api/results/"):
+            try:
+                r = list(bot.results)[int(url.path.rsplit("/", 1)[1])]
+            except (ValueError, IndexError):
+                return self._send(404, {"error": "no such workbook"})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", f'attachment; filename="{r["name"]}"')
+            self.send_header("Content-Length", str(len(r["data"])))
+            self.end_headers()
+            self.wfile.write(r["data"])
+            return
+        if url.path == "/api/project" and q.get("name") == bot.live["project"] and bot.current_files:
+            return self._send(200, {"name": q["name"], "files": [
+                {"path": rel, "lines": text.count("\n") + 1, "bytes": len(text)}
+                for rel, text in bot.current_files.items()]})
+        if url.path == "/api/file" and q.get("project") == bot.live["project"] and q.get("path") in bot.current_files:
+            return self._send(200, {"path": q["path"], "text": bot.current_files[q["path"]]})
+        if url.path == "/api/project":
+            name = q.get("name", "")
+            if name not in list_projects():
+                return self._send(404, {"error": "no such project"})
+            files = project_files(name)
+            files = project_scaffold(name, [rel for rel, _ in files]) + files
+            return self._send(200, {"name": name, "files": [
+                {"path": rel, "lines": text.count("\n") + 1, "bytes": len(text)} for rel, text in files]})
+        if url.path == "/api/file":
+            name = q.get("project", "")
+            if name not in list_projects():
+                return self._send(404, {"error": "no such project"})
+            files = project_files(name)
+            files = project_scaffold(name, [rel for rel, _ in files]) + files
+            for rel, text in files:
+                if rel == q.get("path"):
+                    return self._send(200, {"path": rel, "text": text})
+            return self._send(404, {"error": "no such file"})
         if self.path in ("/", "/index.html"):
             with open(INDEX, "rb") as fh:
                 return self._send(200, fh.read(), "text/html; charset=utf-8")
         if self.path == "/api/status":
-            return self._send(200, bot.status())
+            st = bot.status()
+            st["schedule"] = scheduler.status()
+            return self._send(200, st)
+        if self.path == "/manifest.webmanifest":
+            return self._send(200, {
+                "id": "/", "name": "Invotech 360", "short_name": "Invotech 360",
+                "description": "Invotech 360 task dashboard", "start_url": "/", "scope": "/",
+                "display": "standalone", "background_color": "#0E2135", "theme_color": "#0E2135",
+                "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                          {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                          {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+            }, "application/manifest+json")
+        if self.path in ("/icon-512.png", "/icon-192.png"):
+            name = "invotech360.png" if "512" in self.path else "invotech360-192.png"
+            with open(os.path.join(HERE, "assets", name), "rb") as fh:
+                return self._send(200, fh.read(), "image/png")
+        if self.path == "/sw.js":
+            # tiny service worker: lets Edge / Chrome install the dashboard as an app
+            return self._send(200, (
+                'self.addEventListener("install", () => self.skipWaiting());\n'
+                'self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));\n'
+                'self.addEventListener("fetch", (e) => e.respondWith(fetch(e.request)));\n').encode(),
+                "text/javascript")
+        if self.path in ("/favicon.ico", "/favicon.png"):
+            with open(FAVICON, "rb") as fh:
+                return self._send(200, fh.read(), "image/png")
         if self.path == "/api/settings":
             from dataclasses import asdict
             return self._send(200, {"config": asdict(load_settings()), "languages": LANGUAGES,
-                                    "projects": list_projects(), "monitors": monitors_info()})
+                                    "generator": {"languages": list(GEN_LANGUAGES),
+                                                  "domains": {k: v[0] for k, v in GEN_DOMAINS.items()}},
+                                    "projects": list_projects(), "sheet_projects": list_sheet_projects(),
+                                    "uploaded_projects": uploaded_projects(),
+                                    "monitors": monitors_info()})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -89,10 +220,74 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin", "")
         if origin and not origin.startswith(("http://localhost", "http://127.0.0.1")):
             return self._send(403, {"error": "forbidden"})
+        if self.path.startswith("/api/sheets/upload"):
+            # your own workbook (.xlsx / .xlsm / .xls / .csv) to be typed into WPS Office
+            from codebot.sheets import UPLOADS, is_upload_name, validate_workbook
+            name = os.path.basename(parse_qs(urlparse(self.path).query).get("name", [""])[0])
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if not is_upload_name(name) or not 0 < length <= 20_000_000:
+                return self._send(400, {"ok": False, "message": "Upload an Excel workbook (.xlsx, .xlsm, .xls) or .csv file (up to 20 MB)"})
+            os.makedirs(UPLOADS, exist_ok=True)
+            ext = os.path.splitext(name)[1].lower()
+            handle, temp_path = tempfile.mkstemp(prefix=".upload-", suffix=ext, dir=UPLOADS)
+            try:
+                with os.fdopen(handle, "wb") as fh:
+                    remaining = length
+                    while remaining:
+                        chunk = self.rfile.read(min(remaining, 1 << 16))
+                        if not chunk:
+                            raise OSError("the upload ended before all bytes arrived")
+                        fh.write(chunk)
+                        remaining -= len(chunk)
+                validate_workbook(temp_path)
+                os.replace(temp_path, os.path.join(UPLOADS, name))
+            except ValueError as exc:
+                return self._send(400, {"ok": False, "message": str(exc)})
+            except OSError as exc:
+                return self._send(400, {"ok": False, "message": f"Couldn't save {name}: {exc}"})
+            finally:
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+            return self._send(200, {"ok": True, "message": f"{name} added - it will be typed into WPS Office"})
+        if urlparse(self.path).path == "/api/projects/upload":
+            name = os.path.basename(parse_qs(urlparse(self.path).query).get("name", [""])[0])
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if not name.lower().endswith(".zip") or not 0 < length <= PROJECT_UPLOAD_MAX_BYTES:
+                return self._send(400, {"ok": False, "message": "Upload a project ZIP up to 50 MB"})
+            try:
+                imported = import_project_archive(name, self._read_upload(length))
+            except (ValueError, OSError) as exc:
+                return self._send(400, {"ok": False, "message": str(exc)})
+            except Exception as exc:  # keep upload failures readable in the dashboard
+                print(f"Project ZIP import failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+                return self._send(500, {"ok": False,
+                                        "message": f"The ZIP could not be imported ({type(exc).__name__}). Check the app window for details."})
+            message = f"Imported {name} as {imported['name']} ({imported['files']} text files)"
+            if imported["skipped"]:
+                message += (f"; skipped {imported['skipped']} unsupported, non-ASCII, binary, "
+                            "dependency, or oversized files")
+            return self._send(200, {"ok": True, "message": message, "project": imported})
         body = self._body()
+        if self.path == "/api/sheets/delete":
+            from codebot.sheets import delete_uploaded
+            deleted = delete_uploaded(body.get("name", ""))
+            return self._send(200, {"ok": deleted})
+        if self.path == "/api/projects/delete":
+            deleted = delete_uploaded_project(body.get("name", ""))
+            return self._send(200, {"ok": deleted, "message": "Uploaded project removed" if deleted
+                                    else "That project is not an uploaded project"})
         routes = {
-            "/api/start": lambda: (save_settings(body), bot.start(body))[1],
-            "/api/stop": bot.stop,
+            "/api/start": lambda: (save_settings(body), start_by_hand(body))[1],
+            "/api/stop": lambda: bot.stop("user"),
             "/api/pause": bot.pause,
             "/api/resume": bot.resume,
             "/api/open-editor": lambda: (bot.open_editor(Config.from_dict(body) if body else load_settings()),
@@ -103,41 +298,106 @@ class Handler(BaseHTTPRequestHandler):
         if not fn:
             return self._send(404, {"error": "not found"})
         ok, msg = fn()
-        self._send(200, {"ok": bool(ok), "message": msg, "status": bot.status()})
+        st = bot.status()
+        st["schedule"] = scheduler.status()
+        self._send(200, {"ok": bool(ok), "message": msg, "status": st})
+
+
+def open_dashboard(url):
+    """Open the dashboard in its own app window (Edge / Chrome "app" mode: no tabs or
+    address bar, the Invotech 360 icon in the taskbar). Falls back to the normal browser."""
+    import shutil
+    import subprocess
+    candidates = []
+    if sys.platform.startswith("win"):
+        for base in (os.environ.get("ProgramFiles(x86)", ""), os.environ.get("ProgramFiles", ""),
+                     os.environ.get("LOCALAPPDATA", "")):
+            if base:
+                candidates += [os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"),
+                               os.path.join(base, "Google", "Chrome", "Application", "chrome.exe")]
+    elif sys.platform == "darwin":
+        candidates += ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                       "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]
+    else:
+        candidates += [shutil.which(n) or "" for n in ("google-chrome", "chromium", "chromium-browser", "microsoft-edge")]
+    for exe in candidates:
+        if exe and os.path.exists(exe):
+            try:
+                subprocess.Popen([exe, f"--app={url}", "--window-size=1440,900"],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except OSError:
+                pass
+    webbrowser.open(url)
+
+
+def already_running(port):
+    """Is our own dashboard answering on this port?"""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=2) as r:
+            return "state" in json.loads(r.read())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def main():
-    p = argparse.ArgumentParser(description="code-bot control panel")
+    p = argparse.ArgumentParser(description="Invotech 360 control panel")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true", help="don't open the dashboard")
-    p.add_argument("--no-editor", action="store_true", help="don't open Notepad on launch")
+    p.add_argument("--no-editor", action="store_true", help=argparse.SUPPRESS)   # old flag, now the default
+    p.add_argument("--open-editor", action="store_true",
+                   help="open VS Code right away (default: it opens when you press Start)")
     p.add_argument("--autostart", action="store_true", help="start the bot right away")
+    p.add_argument("--background", action="store_true",
+                   help="started at login / by the 3 AM task: no browser, no editor; the schedule decides")
+    p.add_argument("--no-schedule", action="store_true", help="don't start/stop by the daily schedule")
     args = p.parse_args()
+    url = f"http://localhost:{args.port}"
 
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError:
-        print(f"Port {args.port} is busy. Is code-bot already running? "
+        if already_running(args.port):
+            # Invotech 360 is already running (it starts at login): just show the dashboard
+            if not args.background:
+                open_dashboard(url)
+            sys.exit(0)
+        print(f"Port {args.port} is busy. Is something else using it? "
               f"Try: python app.py --port {args.port + 1}")
         sys.exit(1)
 
-    url = f"http://localhost:{args.port}"
     hot = bot.start_listeners()
     print("=" * 56)
-    print(f"  code-bot dashboard:  {url}")
-    print("  Kill switch: press Esc TWICE quickly.  F9 = pause/resume" if hot else
-          "  (install pynput for the Esc-Esc kill switch)")
+    print(f"  Invotech 360 dashboard:  {url}")
+    print("  Kill switch: press Esc once.  F9 = pause/resume" if hot else
+          "  (install pynput for the Esc kill switch)")
     print("  Use your mouse/keyboard any time - the bot pauses and waits for you")
     print("  Quit server: Ctrl+C")
     print("=" * 56, flush=True)
 
-    if not args.no_editor:
+    cfg = load_settings()
+    if cfg.schedule_enabled and not args.no_schedule:
+        st = scheduler.status()
+        print(f"  Schedule: every day from {cfg.schedule_start}, no time limit "
+              f"(next start: {st['next_start_text']})", flush=True)
+    if not args.no_schedule:
+        if not args.background:
+            # opened by hand: just the dashboard - you pick the project and press Start.
+            # The schedule takes over again from its next start time.
+            from codebot.schedule import day_key
+            scheduler.held_day = day_key(scheduler.now(), cfg)
+        scheduler.run_forever()
+    if args.background:
+        args.no_browser = True
+        args.open_editor = False
+    if args.open_editor:
         threading.Thread(target=lambda: bot.open_editor(load_settings()), daemon=True).start()
     if not args.no_browser:
-        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.0, lambda: open_dashboard(url)).start()
     if args.autostart:
         from dataclasses import asdict
-        threading.Timer(2.5, lambda: bot.start(asdict(load_settings()))).start()
+        threading.Timer(2.5, lambda: start_by_hand(asdict(load_settings()))).start()
 
     try:
         server.serve_forever()

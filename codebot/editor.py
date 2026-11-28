@@ -9,6 +9,7 @@ NotepadEditor - types into a dedicated scratch file in Notepad / TextEdit / gedi
 
 import json
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,8 @@ import tempfile
 import time
 
 import pyautogui
+
+from . import human
 
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
@@ -34,14 +37,18 @@ _EDITOR_CLEAN = {
     "editor.formatOnSave": False,
     "editor.formatOnPaste": False,
     "editor.codeActionsOnSave": {},
-    "editor.quickSuggestions": {"other": "off", "comments": "off", "strings": "off"},
-    "editor.suggestOnTriggerCharacters": False,
+    # autocomplete pops up while typing (looks real) but can never be accepted:
+    # Enter, Tab and commit characters like ( . ; don't accept a suggestion
+    "editor.quickSuggestions": {"other": "on", "comments": "off", "strings": "off"},
+    "editor.quickSuggestionsDelay": 10,
+    "editor.suggestOnTriggerCharacters": True,
+    "editor.wordBasedSuggestions": "matchingDocuments",
+    "editor.parameterHints.enabled": True,
     "editor.acceptSuggestionOnEnter": "off",
     "editor.acceptSuggestionOnCommitCharacter": False,
-    "editor.wordBasedSuggestions": "off",
-    "editor.snippetSuggestions": "none",
     "editor.tabCompletion": "off",
-    "editor.parameterHints.enabled": False,
+    "editor.snippetSuggestions": "none",
+    "editor.suggest.preview": False,
     "editor.inlineSuggest.enabled": False,
     "editor.linkedEditing": False,
     "editor.detectIndentation": False,
@@ -64,17 +71,33 @@ WORKSPACE_SETTINGS = {
     "emmet.showExpandedAbbreviation": "never",
     "emmet.triggerExpansionOnTab": False,
     "python.analysis.autoIndent": False,
+    "python.analysis.autoFormatStrings": False,
     "github.copilot.enable": {"*": False},
     "github.copilot.editor.enableAutoCompletions": False,
     "files.autoSave": "afterDelay",
     "files.autoSaveDelay": 1500,
     "workbench.editor.enablePreview": False,
     "workbench.startupEditor": "none",
-    "explorer.autoReveal": True,
+    "explorer.autoReveal": True,            # each new file shows up highlighted in the explorer
+    "workbench.sideBar.location": "left",
+    "chat.disableAIFeatures": True,         # no Copilot chat panel popping open
+    "python.terminal.activateEnvironment": False,   # extensions must not open terminals
+    "python.createEnvironment.trigger": "off",
+    "task.allowAutomaticTasks": "off",
+    "npm.autoDetect": "off",
+    "terminal.integrated.enablePersistentSessions": False,   # no old terminals / "History restored"
+    "terminal.integrated.persistentSessionReviveProcess": "never",
+    "terminal.integrated.hideOnStartup": "always",
+    "editor.stickyScroll.enabled": False,   # no lines pinned at the top of the editor
+    "editor.mouseWheelZoom": False,         # Ctrl + mouse wheel never changes the font size
+    "workbench.tips.enabled": False,
+    "workbench.secondarySideBar.defaultVisibility": "hidden",
+    "chat.commandCenter.enabled": False,
+    "workbench.editor.restoreViewState": True,
     "explorer.confirmDelete": False,
     "git.openRepositoryInParentFolders": "never",
     "extensions.ignoreRecommendations": True,
-    "files.exclude": {"**/.codebot": True, ".vscode": True},
+    "files.exclude": {"**/.codebot": True, "**/.codebot-resume.json": True, ".vscode": True},
     "codebot.managed": True,
 }
 
@@ -138,6 +161,100 @@ class _WindowsFocus:
             pass
         return "refocused"
 
+    @staticmethod
+    def dismiss_owned_dialog(match):
+        """Safely dismiss a modal dialog owned by the editor window on Windows.
+
+        Escape cancels a dialog without accepting a destructive or ambiguous choice. The
+        owner check prevents a popup in another application from receiving the key.
+        """
+        if not IS_WIN:
+            return False
+        try:
+            import ctypes
+            import pygetwindow as gw
+
+            active = gw.getActiveWindow()
+            if active is None or match(active.title):
+                return False
+            app = next((w for w in gw.getAllWindows() if match(w.title) and w._hWnd), None)
+            if app is None or not active._hWnd:
+                return False
+
+            user32 = ctypes.windll.user32
+            user32.GetWindow.restype = ctypes.c_void_p
+            user32.GetWindow.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            user32.GetWindowTextLengthW.restype = ctypes.c_int
+            user32.GetWindowTextLengthW.argtypes = [ctypes.c_void_p]
+            user32.GetWindowTextW.restype = ctypes.c_int
+            user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+            user32.GetClassNameW.restype = ctypes.c_int
+            user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+            hwnd = int(active._hWnd)
+            app_hwnd = int(app._hWnd)
+            owner = user32.GetWindow(ctypes.c_void_p(hwnd), 4)  # GW_OWNER
+            for _ in range(5):
+                if not owner:
+                    break
+                if int(owner) == app_hwnd:
+                    message = []
+                    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+                    def read_child(child, _):
+                        class_name = ctypes.create_unicode_buffer(64)
+                        user32.GetClassNameW(child, class_name, len(class_name))
+                        if class_name.value not in ("Static", "Text", "SysLink"):
+                            return True
+                        length = user32.GetWindowTextLengthW(child)
+                        if 0 < length <= 2000:
+                            text = ctypes.create_unicode_buffer(length + 1)
+                            user32.GetWindowTextW(child, text, len(text))
+                            if text.value.strip():
+                                message.append(text.value.strip())
+                        return True
+
+                    callback = callback_type(read_child)
+                    user32.EnumChildWindows.argtypes = [ctypes.c_void_p, callback_type, ctypes.c_void_p]
+                    user32.EnumChildWindows(ctypes.c_void_p(hwnd), callback, None)
+                    human.press_esc()
+                    time.sleep(0.2)
+                    detail = " · ".join(dict.fromkeys(message))
+                    return (active.title or "untitled dialog") + (f": {detail[:240]}" if detail else "")
+                owner = user32.GetWindow(ctypes.c_void_p(int(owner)), 4)
+            return False
+        except Exception:  # noqa: BLE001
+            return False
+
+
+def active_window_title():
+    """Title of the window that has keyboard focus, or None if we can't tell."""
+    try:
+        if IS_WIN:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            if not hwnd:
+                return None
+            length = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            return buf.value or None          # no title: can't tell, don't block typing
+        if IS_MAC:
+            script = ('tell application "System Events" to set p to first application process whose frontmost is true\n'
+                      'tell application "System Events" to tell p\n'
+                      '  set t to name of p\n'
+                      '  try\n    set t to t & " | " & (name of front window)\n  end try\n'
+                      'end tell\nreturn t')
+            out = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=2)
+            return out.stdout.strip() if out.returncode == 0 else None
+        if shutil.which("xdotool"):
+            out = subprocess.run(["xdotool", "getactivewindow", "getwindowname"],
+                                 capture_output=True, text=True, timeout=2)
+            return out.stdout.strip() if out.returncode == 0 else None
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
 
 def place_window(rect, win_match=None, x_name=None, mac_process=None, mac_contains=None):
     """Move a window onto the monitor `rect` (x, y, w, h) and maximize it there."""
@@ -147,6 +264,8 @@ def place_window(rect, win_match=None, x_name=None, mac_process=None, mac_contai
             win = _WindowsFocus.find(win_match)
             if win is None:
                 return False
+            if win.isMaximized and x <= win.left + 20 < x + w and y <= win.top + 20 < y + h:
+                return True                 # already maximized on the right screen: leave it alone
             if win.isMaximized or win.isMinimized:
                 win.restore()
                 time.sleep(0.3)
@@ -210,8 +329,8 @@ class VSCodeEditor:
     def _title_match(self, title):
         return "Visual Studio Code" in title and f"{self.root_name} - " in title + " - "
 
-    def _write_settings(self):
-        vs = os.path.join(self.ws, ".vscode")
+    def _write_settings(self, folder=None):
+        vs = os.path.join(folder or self.ws, ".vscode")
         os.makedirs(vs, exist_ok=True)
         path = os.path.join(vs, "settings.json")
         if os.path.exists(path):
@@ -238,12 +357,20 @@ class VSCodeEditor:
                      "'Shell Command: Install code command in PATH'), or switch to Notepad.")
             return False
         os.makedirs(self.ws, exist_ok=True)
-        self._write_settings()
+        if not self.project_dir:
+            return True     # VS Code opens on the project's own folder once a project starts
         if self.is_open():
             self.focus(force=True)
             return True
-        self.log(f"Opening VS Code workspace {self.ws}")
-        self._run_cli("-n", self.ws)
+        self._open_folder(self.project_dir, reuse=False)
+        return True
+
+    def _open_folder(self, folder, reuse):
+        """Open `folder` as VS Code's folder: the explorer shows exactly this project.
+        reuse=True switches the bot's own window to it (no new window)."""
+        self.root_name = os.path.basename(folder.rstrip("\\/"))
+        self.log(f"Opening VS Code on {folder}")
+        self._run_cli("-r" if reuse else "-n", folder)
         self._launched = True
         for _ in range(40):  # wait up to ~20s for the window
             time.sleep(0.5)
@@ -251,7 +378,6 @@ class VSCodeEditor:
                 break
         time.sleep(4 if not IS_WIN else 2.5)
         self.focus(force=True)
-        return True
 
     # -------------------------------------------------------------- focus
     def focus(self, force=False):
@@ -329,14 +455,17 @@ class VSCodeEditor:
                 shutil.rmtree(path, ignore_errors=True)
         self._save_manifest([n for n in ours if n in keep and os.path.isdir(os.path.join(self.ws, n))])
 
-    def begin_project(self, name):
-        self.focus(force=True)
-        mod = "command" if IS_MAC else "ctrl"
-        pyautogui.hotkey(mod, "k")         # Close all editors (Ctrl+K Ctrl+W)
-        pyautogui.hotkey(mod, "w")
-        time.sleep(0.5)
+    def begin_project(self, name, interactive=True):
+        """Create the project's folder and open THAT folder in VS Code (explorer = this
+        project). No command palette, no panels opened or closed, no keyboard shortcuts."""
+        window_up = self._launched and self.is_open()
         ours = self._ours()
         keep = [n for n in ours if n != name] if self.keep_finished else []
+        pending = [n for n in ours
+                   if os.path.isfile(os.path.join(self.ws, n, ".codebot-resume.json"))]
+        keep = sorted(set(keep) | set(pending))
+        if pending and not self.keep_finished:
+            self.log(f"Preserving {len(pending)} unfinished project folder(s) in the workspace")
         self.cleanup(keep=keep)            # workspace = just the project being written
         dest = os.path.join(self.ws, name)
         if os.path.exists(dest):            # a folder we didn't create: never touch it
@@ -347,28 +476,281 @@ class VSCodeEditor:
         os.makedirs(dest, exist_ok=True)
         self._save_manifest(keep + [os.path.basename(dest)])
         self.project_dir = dest
+        self._write_settings(dest)          # clean typing + no terminal/chat, hidden from the explorer
         self.log(f"New project: {os.path.basename(dest)}")
+        if self.cli:
+            if window_up:
+                self.focus(force=True)      # so "-r" switches the bot's window, not one of yours
+                time.sleep(0.4)
+            self._open_folder(dest, reuse=window_up)
         time.sleep(1.0)
 
-    def begin_file(self, rel):
+    def find_resume_checkpoint(self):
+        """Return the newest unfinished project snapshot owned by this workspace."""
+        candidates = []
+        for folder in self._ours():
+            root = os.path.join(self.ws, folder)
+            checkpoint = os.path.join(root, ".codebot-resume.json")
+            try:
+                if os.path.getsize(checkpoint) > 5_000_000:
+                    continue
+                with open(checkpoint, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if (data.get("version") != 1 or data.get("folder") != folder
+                        or not isinstance(data.get("project"), str)
+                        or not isinstance(data.get("files"), list)):
+                    continue
+                files = []
+                valid = True
+                for item in data["files"]:
+                    if not isinstance(item, dict) or not isinstance(item.get("path"), str) \
+                            or not isinstance(item.get("text"), str):
+                        valid = False
+                        break
+                    rel = item["path"].replace("\\", "/")
+                    native = os.path.normpath(rel)
+                    if (not rel or rel.startswith("/") or ":" in rel.split("/")[0]
+                            or native in (".", "..") or native.startswith(".." + os.sep)):
+                        valid = False
+                        break
+                    files.append((rel, item["text"]))
+                if valid and files:
+                    data["files"] = files
+                    data["root"] = root
+                    data["_mtime"] = os.path.getmtime(checkpoint)
+                    candidates.append(data)
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item["_mtime"])
+
+    def save_resume_checkpoint(self, project, files, steps=None):
+        """Persist the exact source snapshot so a stopped project can continue after restart."""
+        if not self.project_dir:
+            return False
+        data = {
+            "version": 1,
+            "project": project,
+            "folder": os.path.basename(self.project_dir),
+            "updated": time.time(),
+            "files": [{"path": rel.replace("\\", "/"), "text": text} for rel, text in files],
+            "steps": steps or [],
+        }
+        path = os.path.join(self.project_dir, ".codebot-resume.json")
+        temp = path + ".tmp"
+        try:
+            with open(temp, "w", encoding="utf-8", newline="\n") as fh:
+                json.dump(data, fh, ensure_ascii=True)
+            os.replace(temp, path)
+            return True
+        except OSError as exc:
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            self.log(f"Couldn't save the project resume point: {exc}")
+            return False
+
+    def resume_project(self, folder, interactive=True):
+        """Reopen an unfinished bot-owned project without clearing its files."""
+        if folder not in self._ours() or folder in ("", ".", "..") or "/" in folder or "\\" in folder:
+            raise ValueError("resume folder is not a bot-owned project")
+        dest = os.path.abspath(os.path.join(self.ws, folder))
+        if os.path.dirname(dest) != os.path.abspath(self.ws) or not os.path.isdir(dest):
+            raise ValueError("resume project folder is missing")
+        self.root_name = folder
+        window_up = self.is_open() if IS_WIN else self._launched and self.is_open()
+        self.project_dir = dest
+        self._write_settings(dest)
+        self.log(f"Resuming project: {folder}")
+        if self.cli:
+            if window_up:
+                self.focus(force=True)
+                time.sleep(0.4)
+            self._open_folder(dest, reuse=window_up)
+        time.sleep(0.5)
+
+    def clear_resume_checkpoint(self):
+        """Remove the resume snapshot only after the project is complete."""
+        if not self.project_dir:
+            return
+        try:
+            os.remove(os.path.join(self.project_dir, ".codebot-resume.json"))
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            self.log(f"Couldn't clear the completed project's resume point: {exc}")
+
+    def write_repaired_file(self, rel, text):
+        """Save a reviewed correction inside the active project folder."""
+        if not self.project_dir:
+            return False
+        path = os.path.abspath(os.path.join(self.project_dir, *rel.replace("\\", "/").split("/")))
+        if os.path.commonpath((os.path.abspath(self.project_dir), path)) != os.path.abspath(self.project_dir):
+            raise ValueError("refusing to write a correction outside the active project")
+        temp = path + ".codebot-tmp"
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(temp, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+            os.replace(temp, path)
+            return True
+        except OSError as exc:
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            self.log(f"Couldn't save the correction to {rel}: {exc}")
+            return False
+
+    def prepare_files(self, files, stopped=None):
+        """Create every source file before typing begins; never overwrite an existing file."""
+        for rel, _ in files:
+            if stopped and stopped():
+                return False
+            path = os.path.join(self.project_dir, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if not os.path.exists(path):
+                open(path, "w", encoding="utf-8").close()
+        return True
+
+    def begin_file(self, rel, show=True, truncate=True):
         path = os.path.join(self.project_dir, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        open(path, "w", encoding="utf-8").close()
+        if truncate or not os.path.exists(path):
+            open(path, "w", encoding="utf-8").close()
+        if show:
+            self.show_file(path)
+        return path
+
+    def show_file(self, path):
+        """Open (or switch to) the file's tab. VS Code shows what's on disk."""
+        self.current_file = path
+        if self.project_dir and not self.is_open():
+            self._open_folder(self.project_dir, reuse=False)
         self._run_cli(path)
         time.sleep(1.6)
         self.focus(force=True)
         time.sleep(0.3)
-        return path
+        if self.is_active() is not False:
+            self.focus_editor()
+
+    def resume_file(self, path):
+        """Reopen an existing file and put the caret after its last typed line."""
+        self.show_file(path)
+        pyautogui.hotkey(*doc_end_keys())
+        time.sleep(0.15)
+
+    def handle_popup(self):
+        """Cancel an owned modal dialog, if one is blocking VS Code."""
+        return _WindowsFocus.dismiss_owned_dialog(self._title_match)
 
     def end_file(self, path, expected):
+        self.save_chunk(path)
+        return self.verify(path, expected)
+
+    def save_chunk(self, path=None):
+        """Save a partial pass without checking it against the full source file."""
         pyautogui.hotkey("command" if IS_MAC else "ctrl", "s")
-        time.sleep(1.0)
+        time.sleep(0.35)
+
+    def verify(self, path, expected):
         try:
             with open(path, encoding="utf-8") as fh:
                 typed = fh.read()
         except OSError:
             return None
         return _norm(typed) == _norm(expected)
+
+    def is_active(self):
+        """Is the bot's VS Code window the one getting keystrokes? None = can't tell
+        (then typing carries on). Only a clearly different window counts as False."""
+        title = active_window_title()
+        if not title:
+            return None
+        if self.root_name in title:
+            return True
+        current = os.path.basename(getattr(self, "current_file", "") or "")
+        if current and current in title and ("Visual Studio Code" in title or IS_MAC):
+            return True
+        return False
+
+    def _palette(self, command, settle=1.0):
+        """Run a VS Code command through the command palette, typed like a person."""
+        mod = "command" if IS_MAC else "ctrl"
+        pyautogui.hotkey(mod, "shift", "p")
+        time.sleep(random.uniform(0.5, 0.9))
+        for ch in command:
+            pyautogui.write(ch)
+            time.sleep(random.uniform(0.03, 0.09))
+        time.sleep(random.uniform(0.4, 0.8))
+        pyautogui.press("enter")
+        time.sleep(settle)
+
+    def new_terminal(self):
+        """Open a fresh integrated terminal (Ctrl+Shift+`) - starts in the workspace folder."""
+        self.focus(force=True)
+        self._palette("Terminal: Create New Terminal", settle=2.5)
+
+    def open_terminal(self):
+        """Focus VS Code's integrated terminal (creates one if needed)."""
+        self.focus(force=True)
+        self._palette("Terminal: Focus Terminal", settle=1.2)
+
+    def layout(self):
+        """Where the editor, explorer, terminal panel... are on screen right now."""
+        from .vscode_ui import Layout
+        rect = self.region()
+        if getattr(self, "_layout", None) is None or self._layout.rect != tuple(int(v) for v in rect):
+            self._layout = Layout(rect)
+        return self._layout
+
+    def open_terminal_ui(self, use_mouse=True, stop=None):
+        """Terminal > New Terminal with the mouse (menu bar), like a person would. Falls back
+        to the command palette if the menu can't be found or didn't open. Returns how."""
+        from .vscode_ui import click_menu
+        self.focus(force=True)
+        how = "palette"
+        if use_mouse and click_menu(self.layout(), "Terminal", 0, stop=stop):
+            how = "menu"
+            time.sleep(2.0)
+        else:
+            self._palette("Terminal: Create New Terminal", settle=2.5)
+        self.click_terminal(use_mouse, stop)
+        return how
+
+    def click_terminal(self, use_mouse=True, stop=None):
+        """Click into the terminal panel, then make sure the terminal really has the focus
+        (so a command can never end up typed into the code)."""
+        from . import human
+        from .vscode_ui import point_in
+        if use_mouse:
+            x, y = point_in(self.layout().panel(), fx=random.uniform(0.15, 0.5), fy=random.uniform(0.45, 0.8))
+            human.move_to(x, y, stop=stop)
+            if not (stop and stop()):
+                time.sleep(random.uniform(0.15, 0.35))
+                pyautogui.click()
+                time.sleep(0.3)
+        self._palette("Terminal: Focus Terminal", settle=0.8)
+
+    def open_browser(self, url, beside=True):
+        """Show the running app inside VS Code (Simple Browser), next to the code."""
+        self.focus(force=True)
+        self._palette("Simple Browser: Show", settle=1.0)
+        for ch in url:
+            pyautogui.write(ch)
+            time.sleep(random.uniform(0.03, 0.08))
+        time.sleep(0.4)
+        pyautogui.press("enter")
+        time.sleep(2.0)
+        if beside:   # into a group of its own on the right: code left, app right
+            self._palette("View: Move Editor into Next Group", settle=1.5)
+
+    def focus_editor(self):
+        """Keyboard into the code editor (never the explorer or a terminal)."""
+        pyautogui.hotkey("command" if IS_MAC else "ctrl", "1")
+        time.sleep(0.3)
 
     def clear(self):
         pass
@@ -478,11 +860,18 @@ class NotepadEditor:
         place_window(rect, win_match=self._title_match, x_name=SCRATCH_NAME,
                      mac_process="TextEdit", mac_contains=SCRATCH_NAME)
 
-    def begin_project(self, name):
+    def is_active(self):
+        title = active_window_title()
+        if title is None:
+            return None
+        return os.path.splitext(SCRATCH_NAME)[0] in title
+
+    def begin_project(self, name, interactive=True):
         self.log(f"New project: {name}")
 
-    def begin_file(self, rel):
-        self.clear()
+    def begin_file(self, rel, show=True):
+        if show:
+            self.clear()
         return None
 
     def end_file(self, path, expected):
@@ -505,6 +894,9 @@ class FocusedWindowEditor(NotepadEditor):
 
     def place(self, rect):
         pass
+
+    def is_active(self):
+        return None   # whatever window you choose is the target
 
     def focus(self, force=False):
         return "ok"
