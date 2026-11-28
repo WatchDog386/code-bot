@@ -136,6 +136,17 @@ def import_project_archive(filename, payload):
     for info in infos:
         if info.is_dir():
             continue
+        rel = info.filename.replace("\\", "/")
+        parts = rel.split("/")
+        if (not rel or rel.startswith("/") or any(":" in part for part in parts)
+                or any(part in ("", ".", "..") for part in parts)):
+            raise ValueError("The ZIP contains an unsafe file path")
+        # Ignore common generated folders before inspecting their file metadata. ZIPs made
+        # by Git, npm, or macOS can contain links or encrypted metadata in these folders;
+        # none of those entries are ever extracted into a project.
+        if any(part in SKIP_DIRS or part == "__MACOSX" for part in parts[:-1]):
+            skipped += 1
+            continue
         mode = (info.external_attr >> 16) & 0o170000
         if stat.S_ISLNK(mode):
             raise ValueError("ZIP projects cannot contain symbolic links")
@@ -143,14 +154,6 @@ def import_project_archive(filename, payload):
             raise ValueError("The ZIP contains a non-regular file")
         if info.flag_bits & 0x1:
             raise ValueError("Encrypted ZIP files are not supported")
-        rel = info.filename.replace("\\", "/")
-        parts = rel.split("/")
-        if (not rel or rel.startswith("/") or any(":" in part for part in parts)
-                or any(part in ("", ".", "..") for part in parts)):
-            raise ValueError("The ZIP contains an unsafe file path")
-        if any(part in SKIP_DIRS or part == "__MACOSX" for part in parts[:-1]):
-            skipped += 1
-            continue
         basename = parts[-1]
         if basename == ".codebot-order":
             if len(parts) <= 2 and info.file_size <= 200_000:

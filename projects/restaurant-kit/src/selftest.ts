@@ -1,6 +1,8 @@
 /** Self-test for the Restaurant Orders kit: run `node dist/selftest.js` after `tsc -p .`. */
 
 import { ValidationError } from "./models";
+import { toCsv } from "./csv";
+import { dailySales, dailySalesCsv } from "./reports";
 import {
   ConflictError,
   NotFoundError,
@@ -1713,6 +1715,22 @@ test("contact person: stats and queries", () => {
   assert(newest.length === 1 && newest[0].id === 3, "sort/page failed");
   throwsField(() => queryContactPersons(s.store, { sort: "nope" }), "sort");
   assert(describeContactPerson().length === 7, "field list incomplete");
+});
+
+test("CSV: quotes delimiters and line breaks", () => {
+  const output = toCsv(["name", "note"], [["Tea", "hot, iced"]]);
+  assert(output === "name,note\r\nTea,\"hot, iced\"\r\n", "CSV quoting was incorrect");
+});
+
+test("reports: daily totals include paid orders only", () => {
+  const rows = dailySales([
+    { id: 1, diningTableId: 1, opened: "2026-04-02", guests: 2, total: 12.5, status: "paid", server: "Sam" },
+    { id: 2, diningTableId: 1, opened: "2026-04-02", guests: 1, total: 7.5, status: "paid", server: "Lee" },
+    { id: 3, diningTableId: 2, opened: "2026-04-02", guests: 2, total: 99, status: "open", server: "Sam" },
+  ]);
+  assert(rows.length === 1 && rows[0].orders === 2 && rows[0].gross === 20 && rows[0].average === 10,
+    "paid daily sales were incorrect");
+  assert(dailySalesCsv([]) === "day,orders,gross,average\r\n", "empty report header was incorrect");
 });
 
 console.log(`${passed} passed, ${failures.length} failed`);

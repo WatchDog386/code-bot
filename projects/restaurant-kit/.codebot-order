@@ -2,5 +2,7 @@ src/models.ts
 src/store.ts
 src/services.ts
 src/queries.ts
+src/csv.ts
+src/reports.ts
 src/selftest.ts
 src/example.ts

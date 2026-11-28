@@ -1,6 +1,9 @@
 clinic_service/models.py
 clinic_service/repository.py
 clinic_service/services.py
+clinic_service/config.py
 clinic_service/api.py
+clinic_service/__main__.py
 tests/test_clinic.py
+tests/test_config.py
 examples/sample_data.py

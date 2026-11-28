@@ -250,6 +250,11 @@ to import your own project; its supported text files keep their folders and cont
 in the same preview/write library. `.git`, dependency/build folders, binary files and files over
 400 KB, as well as non-ASCII text, are skipped. To add more generated ones to the library:
 
+Each library folder now includes its full support structure: source packages, tests, examples,
+configuration, and project notes. The Python and Go services also include container recipes; the
+TypeScript kits include CSV export and domain reports. The project preview includes scaffold files
+such as READMEs, configuration, and documentation alongside the files the bot types.
+
 ```bash
 python -m codebot.gen --out projects --count 6
 ```

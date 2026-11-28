@@ -1,6 +1,9 @@
 school_service/models.py
 school_service/repository.py
 school_service/services.py
+school_service/config.py
 school_service/api.py
+school_service/__main__.py
 tests/test_school.py
+tests/test_config.py
 examples/sample_data.py

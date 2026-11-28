@@ -1114,6 +1114,10 @@ $("sheetUpload").onchange = async () => {
 };
 $("projectUpload").onchange = async () => {
   for (const f of $("projectUpload").files) {
+    if (f.size > 50_000_000) {
+      const message = `${f.name} is ${(f.size / 1_000_000).toFixed(1)} MB. Project ZIPs must be 50 MB or smaller; remove dependency and build folders, then zip the project again.`;
+      $("projectUploadStatus").textContent = message; toast(message); continue;
+    }
     $("projectUploadStatus").textContent = `Uploading ${f.name}…`;
     try {
       const response = await fetch("/api/projects/upload?name=" + encodeURIComponent(f.name), { method: "POST", body: f });
@@ -1135,9 +1139,17 @@ $("projectUpload").onchange = async () => {
         $("projectUploadStatus").textContent = message; toast(message);
       }
     } catch (error) {
-      const detail = error?.message === "Failed to fetch"
-        ? "The local bot server could not be reached. Keep the bot app running and retry."
-        : (error?.message || "Unknown upload error");
+      let detail = error?.message || "Unknown upload error";
+      if (/failed to fetch|networkerror|load failed/i.test(detail)) {
+        try {
+          const health = await fetch("/api/status", { cache: "no-store" });
+          detail = health.ok
+            ? "The upload connection was interrupted, but the local server is still responding. Check the ZIP size and retry."
+            : `The upload failed and the local server returned HTTP ${health.status}.`;
+        } catch {
+          detail = "The local bot server could not be reached. Keep the bot app running and retry.";
+        }
+      }
       const message = `Couldn't upload ${f.name}: ${detail}`;
       $("projectUploadStatus").textContent = message; toast(message);
     }

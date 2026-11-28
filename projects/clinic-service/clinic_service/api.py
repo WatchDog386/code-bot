@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from .config import Settings
 from .models import (
     ADDRESS_SORTABLE,
     APPOINTMENT_SORTABLE,
@@ -1023,13 +1024,16 @@ class Handler(BaseHTTPRequestHandler):
         self._dispatch("DELETE")
 
 
-def main(port: int = 8000) -> None:
+def main(port: Optional[int] = None) -> None:
     """Seed some sample data and serve until Ctrl+C."""
+    settings = Settings.from_env()
+    if port is not None:
+        settings = Settings(host=settings.host, port=port, seed_size=settings.seed_size)
     api = Api()
-    api.services.seed()
+    api.services.seed(settings.seed_size)
     Handler.api = api
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"Clinic Scheduling API on http://127.0.0.1:{port}  (Ctrl+C to stop)", flush=True)
+    server = ThreadingHTTPServer((settings.host, settings.port), Handler)
+    print(f"Clinic Scheduling API on http://{settings.host}:{settings.port}  (Ctrl+C to stop)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 try:
     from codebot.engine import Bot, Config, monitors_info
     from codebot.projects import (PROJECT_UPLOAD_MAX_BYTES, delete_uploaded_project, import_project_archive,
-                                 list_projects, project_files, uploaded_projects)
+                                 list_projects, project_files, project_scaffold, uploaded_projects)
     from codebot.sheets import list_sheet_projects
     from codebot.snippets import LANGUAGES
     from codebot.gen import LANGUAGES as GEN_LANGUAGES
@@ -106,6 +106,18 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return {}
 
+    def _read_upload(self, length):
+        """Read exactly one bounded upload body, tolerating short socket reads."""
+        chunks = []
+        remaining = length
+        while remaining:
+            chunk = self.rfile.read(min(remaining, 1 << 20))
+            if not chunk:
+                raise OSError("the upload ended before all bytes arrived")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
     def do_GET(self):
         url = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
@@ -150,13 +162,16 @@ class Handler(BaseHTTPRequestHandler):
             if name not in list_projects():
                 return self._send(404, {"error": "no such project"})
             files = project_files(name)
+            files = project_scaffold(name, [rel for rel, _ in files]) + files
             return self._send(200, {"name": name, "files": [
                 {"path": rel, "lines": text.count("\n") + 1, "bytes": len(text)} for rel, text in files]})
         if url.path == "/api/file":
             name = q.get("project", "")
             if name not in list_projects():
                 return self._send(404, {"error": "no such project"})
-            for rel, text in project_files(name):
+            files = project_files(name)
+            files = project_scaffold(name, [rel for rel, _ in files]) + files
+            for rel, text in files:
                 if rel == q.get("path"):
                     return self._send(200, {"path": rel, "text": text})
             return self._send(404, {"error": "no such file"})
@@ -249,12 +264,13 @@ class Handler(BaseHTTPRequestHandler):
             if not name.lower().endswith(".zip") or not 0 < length <= PROJECT_UPLOAD_MAX_BYTES:
                 return self._send(400, {"ok": False, "message": "Upload a project ZIP up to 50 MB"})
             try:
-                imported = import_project_archive(name, self.rfile.read(length))
+                imported = import_project_archive(name, self._read_upload(length))
             except (ValueError, OSError) as exc:
                 return self._send(400, {"ok": False, "message": str(exc)})
             except Exception as exc:  # keep upload failures readable in the dashboard
                 print(f"Project ZIP import failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-                return self._send(500, {"ok": False, "message": "The server couldn't save this ZIP to its local database."})
+                return self._send(500, {"ok": False,
+                                        "message": f"The ZIP could not be imported ({type(exc).__name__}). Check the app window for details."})
             message = f"Imported {name} as {imported['name']} ({imported['files']} text files)"
             if imported["skipped"]:
                 message += (f"; skipped {imported['skipped']} unsupported, non-ASCII, binary, "

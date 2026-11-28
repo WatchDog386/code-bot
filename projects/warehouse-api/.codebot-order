@@ -1,6 +1,10 @@
 internal/model/model.go
 internal/store/store.go
 internal/service/service.go
+internal/config/config.go
 internal/httpapi/httpapi.go
+internal/httpapi/middleware.go
 internal/service/service_test.go
+internal/config/config_test.go
+internal/httpapi/middleware_test.go
 examples/sample/main.go

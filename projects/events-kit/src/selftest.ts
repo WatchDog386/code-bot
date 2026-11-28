@@ -1,6 +1,8 @@
 /** Self-test for the Event Ticketing kit: run `node dist/selftest.js` after `tsc -p .`. */
 
 import { ValidationError } from "./models";
+import { toCsv } from "./csv";
+import { ticketSales, ticketSalesCsv } from "./reports";
 import {
   ConflictError,
   NotFoundError,
@@ -1740,6 +1742,22 @@ test("contact person: stats and queries", () => {
   assert(newest.length === 1 && newest[0].id === 3, "sort/page failed");
   throwsField(() => queryContactPersons(s.store, { sort: "nope" }), "sort");
   assert(describeContactPerson().length === 7, "field list incomplete");
+});
+
+test("CSV: quotes delimiters and line breaks", () => {
+  const output = toCsv(["name", "note"], [["Ticket", "early, bird"]]);
+  assert(output === "name,note\r\nTicket,\"early, bird\"\r\n", "CSV quoting was incorrect");
+});
+
+test("reports: summarize ticket sales and remaining capacity", () => {
+  const rows = ticketSales([
+    { id: 2, concertId: 2, name: "Balcony", price: 40, quantity: 20, sold: 5, seated: true },
+    { id: 1, concertId: 1, name: "General", price: 25, quantity: 100, sold: 12, seated: false },
+  ]);
+  assert(rows[0].concertId === 1 && rows[0].remaining === 88 && rows[0].gross === 300,
+    "ticket sales summary was incorrect");
+  assert(ticketSalesCsv([]) === "ticketTypeId,concertId,name,sold,remaining,gross\r\n",
+    "empty report header was incorrect");
 });
 
 console.log(`${passed} passed, ${failures.length} failed`);

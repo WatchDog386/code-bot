@@ -74,7 +74,7 @@ func New(svc *service.Service) http.Handler {
 	mux.HandleFunc("GET /notifications/{id}", a.getNotification)
 	mux.HandleFunc("PATCH /notifications/{id}", a.updateNotification)
 	mux.HandleFunc("DELETE /notifications/{id}", a.deleteNotification)
-	return mux
+	return withRequestContext(mux)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
